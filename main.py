@@ -205,7 +205,8 @@ class QQBindPlugin(Star):
         log_match = re.search(r'\[qq_official_webhook\]\s+([A-F0-9]{32})', event_str)
         openid_display = log_match.group(1) if log_match else user_id
         
-        yield event.plain_result(f"成功将QQ号 {qq_number} 绑定到您的账号\n您的OpenID: {openid_display}")
+        # 使用用户要求的格式
+        yield event.plain_result(f"您的QQID为：{openid_display}\n您绑定的QQ为：{qq_number}")
     
     @filter.command("qqunbind")
     async def qq_unbind(self, event: AstrMessageEvent):
@@ -282,7 +283,7 @@ class QQBindPlugin(Star):
                 if data.get("qq_number") == qq_number:
                     bind_time = data.get("bind_time", 0)
                     bind_time_str = datetime.datetime.fromtimestamp(bind_time).strftime("%Y-%m-%d %H:%M:%S") if bind_time else "未知时间"
-                    yield event.plain_result(f"QQ号 {qq_number} 已绑定\n绑定ID: {openid}\n绑定时间: {bind_time_str}")
+                    yield event.plain_result(f"QQ号 {qq_number} 已绑定\nQQID为：{openid}\n绑定时间：{bind_time_str}")
                     found = True
                     break
             
@@ -308,7 +309,7 @@ class QQBindPlugin(Star):
         
         bind_time_str = datetime.datetime.fromtimestamp(bind_time).strftime("%Y-%m-%d %H:%M:%S") if bind_time else "未知时间"
         
-        yield event.plain_result(f"用户 {user_name} 已绑定QQ号: {qq_number}\n绑定时间: {bind_time_str}\nID: {user_id}")
+        yield event.plain_result(f"您的QQID为：{user_id}\n您绑定的QQ为：{qq_number}\n绑定时间：{bind_time_str}")
     
     @filter.command("qqlist", priority=1)
     @filter.permission_type(filter.PermissionType.ADMIN)
