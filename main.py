@@ -53,7 +53,8 @@ class MyPlugin(Star):
 class QQBindPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
-        data_path = os.path.join(context.get_plugin_data_path(), "bindings.json")
+        # 修改这一行，使用 context.data_path 获取插件数据目录
+        data_path = os.path.join(context.data_path, "bindings.json")
         self.bind_manager = BindManager(data_path)
 
     @filter.command("bind")
