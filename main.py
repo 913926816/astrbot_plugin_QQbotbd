@@ -51,14 +51,25 @@ class QQBindPlugin(Star):
             event_attrs = dir(event)
             logger.debug(f"事件类型: {event_type}, 属性: {event_attrs}")
             
+            # 首先尝试从日志字符串中提取OpenID，这是最可靠的方法
+            event_str = str(event)
+            logger.debug(f"事件字符串: {event_str}")
+            
+            # 尝试匹配 [qq_official_webhook] OPENID: 格式
+            openid_match = re.search(r'\[qq_official_webhook\]\s+([A-F0-9]{32})', event_str)
+            if openid_match:
+                openid = openid_match.group(1)
+                logger.debug(f"从事件字符串中提取OpenID: {openid}")
+                return openid
+            
             # 针对QQOfficialWebhookMessageEvent的特殊处理
             if event_type == "QQOfficialWebhookMessageEvent":
-                # 尝试获取event_id属性，这通常包含OpenID
+                # 尝试获取event_id属性
                 if hasattr(event, 'event_id') and event.event_id:
                     logger.debug(f"从event_id属性获取: {event.event_id}")
                     return event.event_id
                 
-                # 尝试获取channel_id属性，这可能包含OpenID
+                # 尝试获取channel_id属性
                 if hasattr(event, 'channel_id') and event.channel_id:
                     logger.debug(f"从channel_id属性获取: {event.channel_id}")
                     return event.channel_id
@@ -109,14 +120,6 @@ class QQBindPlugin(Star):
                     openid = event.raw_message['sender']['user_openid']
                     logger.debug(f"从raw_message.sender.user_openid获取: {openid}")
                     return openid
-            
-            # 尝试从__str__方法获取OpenID
-            event_str = str(event)
-            openid_match = re.search(r'\[qq_official_webhook\]\s+([A-F0-9]{32})', event_str)
-            if openid_match:
-                openid = openid_match.group(1)
-                logger.debug(f"从事件字符串中提取OpenID: {openid}")
-                return openid
             
             # 临时解决方案：从消息内容中提取QQ号作为ID
             if hasattr(event, 'message_str'):
@@ -171,20 +174,20 @@ class QQBindPlugin(Star):
             qq_number = match.group(1)
             logger.debug(f"通过命令匹配提取到QQ号: {qq_number}")
         
-        # 尝试获取用户ID
-        user_id = self.get_user_openid(event)
-        
-        # 尝试从事件字符串中提取OpenID
+        # 尝试从日志字符串中直接提取OpenID
         event_str = str(event)
         openid_match = re.search(r'\[qq_official_webhook\]\s+([A-F0-9]{32})', event_str)
-        if openid_match and not user_id:
+        if openid_match:
             user_id = openid_match.group(1)
-            logger.debug(f"从事件字符串中提取OpenID: {user_id}")
-        
-        # 如果无法获取用户ID，使用QQ号作为临时ID
-        if not user_id:
-            user_id = f"qq_{qq_number}"
-            logger.warning(f"无法获取用户ID，使用QQ号作为临时ID: {user_id}")
+            logger.debug(f"从日志字符串中直接提取OpenID: {user_id}")
+        else:
+            # 如果无法从日志中提取，尝试使用get_user_openid方法
+            user_id = self.get_user_openid(event)
+            
+            # 如果仍然无法获取用户ID，使用QQ号作为临时ID
+            if not user_id:
+                user_id = f"qq_{qq_number}"
+                logger.warning(f"无法获取用户ID，使用QQ号作为临时ID: {user_id}")
         
         # 检查QQ号是否已被其他用户绑定
         for openid, data in self.bind_data.items():
@@ -201,12 +204,8 @@ class QQBindPlugin(Star):
         
         logger.info(f"用户 {user_id} 绑定QQ号 {qq_number} 成功")
         
-        # 提取日志中的OpenID
-        log_match = re.search(r'\[qq_official_webhook\]\s+([A-F0-9]{32})', event_str)
-        openid_display = log_match.group(1) if log_match else user_id
-        
-        # 使用用户要求的格式
-        yield event.plain_result(f"您的QQID为：{openid_display}\n您绑定的QQ为：{qq_number}")
+        # 确保显示正确的OpenID
+        yield event.plain_result(f"您的QQID为：{user_id}\n您绑定的QQ为：{qq_number}")
     
     @filter.command("qqunbind")
     async def qq_unbind(self, event: AstrMessageEvent):
