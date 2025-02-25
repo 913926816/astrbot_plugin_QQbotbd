@@ -127,13 +127,23 @@ class QQBindPlugin(Star):
         '''绑定QQ号 - 使用方法: /qqbind [QQ号]'''
         message_str = event.message_str.strip()
         
-        # 检查是否提供了QQ号
-        match = re.search(r'/qqbind\s+(\d{5,11})', message_str)
-        if not match:
-            yield event.plain_result("请提供正确的QQ号，格式：/qqbind [QQ号]")
-            return
+        # 打印原始消息，帮助调试
+        logger.debug(f"收到绑定命令，原始消息: '{message_str}'")
         
-        qq_number = match.group(1)
+        # 更灵活的正则表达式，尝试多种可能的格式
+        match = re.search(r'(?:/qqbind|qqbind)\s*(\d{5,11})', message_str)
+        if not match:
+            # 尝试直接提取数字
+            digits_match = re.search(r'(\d{5,11})', message_str)
+            if digits_match:
+                qq_number = digits_match.group(1)
+                logger.debug(f"通过数字匹配提取到QQ号: {qq_number}")
+            else:
+                yield event.plain_result("请提供正确的QQ号，格式：/qqbind [QQ号]")
+                return
+        else:
+            qq_number = match.group(1)
+            logger.debug(f"通过命令匹配提取到QQ号: {qq_number}")
         
         # 尝试获取用户ID
         user_id = self.get_user_openid(event)
@@ -185,14 +195,21 @@ class QQBindPlugin(Star):
     async def qq_unbind_by_qq(self, event: AstrMessageEvent):
         '''通过QQ号解绑 - 使用方法: /qqunbindqq [QQ号]'''
         message_str = event.message_str.strip()
+        logger.debug(f"收到QQ解绑命令，原始消息: '{message_str}'")
         
-        # 检查是否提供了QQ号
-        match = re.search(r'/qqunbindqq\s+(\d{5,11})', message_str)
+        # 更灵活的正则表达式
+        match = re.search(r'(?:/qqunbindqq|qqunbindqq)\s*(\d{5,11})', message_str)
         if not match:
-            yield event.plain_result("请提供正确的QQ号，格式：/qqunbindqq [QQ号]")
-            return
+            # 尝试直接提取数字
+            digits_match = re.search(r'(\d{5,11})', message_str)
+            if digits_match:
+                qq_number = digits_match.group(1)
+            else:
+                yield event.plain_result("请提供正确的QQ号，格式：/qqunbindqq [QQ号]")
+                return
+        else:
+            qq_number = match.group(1)
         
-        qq_number = match.group(1)
         found = False
         
         # 查找绑定了该QQ号的用户ID
@@ -213,9 +230,10 @@ class QQBindPlugin(Star):
     async def qq_info(self, event: AstrMessageEvent):
         '''查询已绑定的QQ号 - 使用方法: /qqinfo [可选:QQ号]'''
         message_str = event.message_str.strip()
+        logger.debug(f"收到查询命令，原始消息: '{message_str}'")
         
-        # 检查是否提供了QQ号
-        match = re.search(r'/qqinfo\s+(\d{5,11})', message_str)
+        # 更灵活的正则表达式
+        match = re.search(r'(?:/qqinfo|qqinfo)\s*(\d{5,11})', message_str)
         
         if match:
             # 通过QQ号查询
