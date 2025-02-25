@@ -5,7 +5,7 @@ import re
 import json
 import os
 
-@register("astrbot_plugin_QQbotbd", "QQ绑定插件", "一个用于绑定用户OpenID与QQ号的插件", "1.0.0", "https://github.com/yourusername/astrbot_plugin_QQbotbd")
+@register("qqbind", "QQ绑定插件", "一个用于绑定用户OpenID与QQ号的插件", "1.0.0", "https://github.com/yourusername/astrbot_plugin_QQbotbd")
 class QQBindPlugin(Star):
     def __init__(self, context: Context):
         """初始化QQ绑定插件
@@ -38,6 +38,32 @@ class QQBindPlugin(Star):
         except Exception as e:
             logger.error(f"保存QQ绑定数据失败: {e}")
     
+    def get_user_openid(self, event):
+        """从事件中获取用户OpenID
+        
+        适配多种事件类型，包括QQ官方Webhook事件
+        """
+        try:
+            # 尝试直接使用user_openid属性
+            if hasattr(event, 'user_openid'):
+                return event.user_openid
+            
+            # 尝试使用get_user_id方法
+            if hasattr(event, 'get_user_id') and callable(event.get_user_id):
+                return event.get_user_id()
+            
+            # 对于QQ官方Webhook事件，可能需要从event.data中获取
+            if hasattr(event, 'data') and isinstance(event.data, dict):
+                if 'sender' in event.data and 'user_openid' in event.data['sender']:
+                    return event.data['sender']['user_openid']
+            
+            # 记录无法获取OpenID的情况
+            logger.error(f"无法从事件中获取用户OpenID: {type(event)}")
+            return None
+        except Exception as e:
+            logger.error(f"获取用户OpenID时出错: {e}")
+            return None
+    
     def get_qq_by_openid(self, openid):
         """根据OpenID获取QQ号
         
@@ -47,14 +73,18 @@ class QQBindPlugin(Star):
         Returns:
             str or None: 查找到的QQ号，如果未找到则返回None
         """
-        if openid in self.bind_data:
+        if openid and openid in self.bind_data:
             return self.bind_data[openid]["qq_number"]
         return None
     
     @filter.command("qqbind")
     async def qq_bind(self, event: AstrMessageEvent):
         '''绑定QQ号 - 使用方法: /qqbind [QQ号]'''
-        user_id = event.get_user_id()  # 获取用户的OpenID
+        user_id = self.get_user_openid(event)
+        if not user_id:
+            yield event.plain_result("无法获取您的用户ID，绑定失败")
+            return
+            
         message_str = event.message_str.strip()
         
         # 检查是否提供了QQ号
@@ -74,7 +104,7 @@ class QQBindPlugin(Star):
         # 绑定QQ号到用户的OpenID
         self.bind_data[user_id] = {
             "qq_number": qq_number,
-            "bind_time": event.timestamp
+            "bind_time": event.timestamp if hasattr(event, 'timestamp') else int(import_time())
         }
         self._save_data()
         
@@ -84,7 +114,10 @@ class QQBindPlugin(Star):
     @filter.command("qqunbind")
     async def qq_unbind(self, event: AstrMessageEvent):
         '''解绑QQ号 - 使用方法: /qqunbind'''
-        user_id = event.get_user_id()  # 获取用户的OpenID
+        user_id = self.get_user_openid(event)
+        if not user_id:
+            yield event.plain_result("无法获取您的用户ID，解绑失败")
+            return
         
         if user_id not in self.bind_data:
             yield event.plain_result("您尚未绑定QQ号")
@@ -100,8 +133,12 @@ class QQBindPlugin(Star):
     @filter.command("qqinfo")
     async def qq_info(self, event: AstrMessageEvent):
         '''查询已绑定的QQ号 - 使用方法: /qqinfo'''
-        user_id = event.get_user_id()  # 获取用户的OpenID
-        user_name = event.get_sender_name()
+        user_id = self.get_user_openid(event)
+        if not user_id:
+            yield event.plain_result("无法获取您的用户ID，查询失败")
+            return
+            
+        user_name = event.get_sender_name() if hasattr(event, 'get_sender_name') and callable(event.get_sender_name) else "用户"
         
         if user_id not in self.bind_data:
             yield event.plain_result("您尚未绑定QQ号，请使用 /qqbind [QQ号] 进行绑定")
@@ -109,11 +146,16 @@ class QQBindPlugin(Star):
         
         qq_data = self.bind_data[user_id]
         qq_number = qq_data["qq_number"]
-        bind_time = qq_data["bind_time"]
+        bind_time = qq_data.get("bind_time", 0)
         
         # 将时间戳转换为可读格式
         import datetime
-        bind_time_str = datetime.datetime.fromtimestamp(bind_time).strftime("%Y-%m-%d %H:%M:%S")
+        import time
+        
+        def import_time():
+            return time.time()
+            
+        bind_time_str = datetime.datetime.fromtimestamp(bind_time).strftime("%Y-%m-%d %H:%M:%S") if bind_time else "未知时间"
         
         yield event.plain_result(f"用户 {user_name} 已绑定QQ号: {qq_number}\n绑定时间: {bind_time_str}\nOpenID: {user_id}")
     
@@ -136,8 +178,12 @@ class QQBindPlugin(Star):
         
         # 如果文本过长，转为图片发送
         if len(result) > 1000:
-            url = await self.text_to_image(result)
-            yield event.image_result(url)
+            try:
+                url = await self.text_to_image(result)
+                yield event.image_result(url)
+            except Exception as e:
+                logger.error(f"转换文本到图片失败: {e}")
+                yield event.plain_result("绑定记录过多，转换图片失败，请查看日志")
         else:
             yield event.plain_result(result)
     
@@ -161,7 +207,6 @@ class QQBindPlugin(Star):
     @filter.permission_type(filter.PermissionType.ADMIN)
     async def who_is_qq(self, event: AstrMessageEvent):
         '''查询指定OpenID对应的QQ号 - 仅管理员可用'''
-        user_id = event.get_user_id()
         message_str = event.message_str.strip()
         
         # 检查是否提供了OpenID
