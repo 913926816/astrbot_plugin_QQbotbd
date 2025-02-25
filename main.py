@@ -40,7 +40,7 @@ class QQBindPlugin(Star):
         except Exception as e:
             logger.error(f"保存QQ绑定数据失败: {e}")
     
-    def get_user_openid(self, event):
+    def user_openid(self, event):
         """从事件中获取用户OpenID
         
         适配多种事件类型，包括QQ官方Webhook事件
@@ -182,7 +182,7 @@ class QQBindPlugin(Star):
             logger.debug(f"从日志字符串中直接提取OpenID: {user_id}")
         else:
             # 如果无法从日志中提取，尝试使用get_user_openid方法
-            user_id = self.get_user_openid(event)
+            user_id = self.user_openid(event)
             
             # 如果仍然无法获取用户ID，使用QQ号作为临时ID
             if not user_id:
@@ -210,7 +210,7 @@ class QQBindPlugin(Star):
     @filter.command("qqunbind")
     async def qq_unbind(self, event: AstrMessageEvent):
         '''解绑QQ号 - 使用方法: /qqunbind'''
-        user_id = self.get_user_openid(event)
+        user_id = self.user_openid(event)
         
         # 如果无法获取用户ID，尝试从已绑定的QQ号中查找
         if not user_id:
@@ -291,7 +291,7 @@ class QQBindPlugin(Star):
             return
         
         # 尝试通过用户ID查询
-        user_id = self.get_user_openid(event)
+        user_id = self.user_openid(event)
         if not user_id:
             yield event.plain_result("无法获取您的用户ID，请使用 /qqinfo [QQ号] 查询特定QQ号的绑定信息")
             return
