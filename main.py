@@ -5,7 +5,7 @@ import re
 import json
 import os
 
-@register("qqbind", "QQ绑定插件", "一个用于绑定用户OpenID与QQ号的插件", "1.0.0", "https://github.com/yourusername/astrbot_plugin_QQbotbd")
+@register("astrbot_plugin_QQbotbd", "QQ绑定插件", "一个用于绑定用户OpenID与QQ号的插件", "1.0.0", "https://github.com/yourusername/astrbot_plugin_QQbotbd")
 class QQBindPlugin(Star):
     def __init__(self, context: Context):
         """初始化QQ绑定插件
