@@ -233,15 +233,21 @@ class QQBindPlugin(Star):
         try:
             # 如果qrcode_data是URL，尝试使用QQ官方API上传并发送
             if qrcode_data.startswith(('http://', 'https://')):
-                # 上传图片到QQ服务器
-                upload_success, file_info = await self.upload_image_to_qq(qrcode_data, user_id)
-                
-                if upload_success:
-                    # 使用file_info发送图片消息
-                    yield event.media_result(file_info)
+                # 检查是否有QQ API客户端
+                if hasattr(self.context, 'qq_api') and callable(getattr(self.context.qq_api, 'post', None)):
+                    # 上传图片到QQ服务器
+                    upload_success, file_info = await self.upload_image_to_qq(qrcode_data, user_id)
+                    
+                    if upload_success:
+                        # 使用file_info发送图片消息
+                        yield event.media_result(file_info)
+                    else:
+                        # 如果上传失败，回退到直接发送URL
+                        logger.warning(f"使用QQ官方API上传图片失败: {file_info}，回退到直接发送URL")
+                        yield event.image_result(qrcode_data)
                 else:
-                    # 如果上传失败，回退到直接发送URL
-                    logger.warning(f"使用QQ官方API上传图片失败: {file_info}，回退到直接发送URL")
+                    # 如果没有QQ API客户端，直接发送URL
+                    logger.info("未找到QQ API客户端，直接发送图片URL")
                     yield event.image_result(qrcode_data)
             elif qrcode_data.startswith('data:image'):
                 # 如果是Base64编码的图片数据，直接发送
@@ -515,8 +521,7 @@ class QQBindPlugin(Star):
             }
             
             # 发送请求
-            # 注意：这里假设AstrBot有提供调用QQ官方API的方法
-            # 如果没有，需要自行实现HTTP请求和鉴权逻辑
+            # 检查是否有QQ API客户端
             if hasattr(self.context, 'qq_api') and callable(getattr(self.context.qq_api, 'post', None)):
                 response = await self.context.qq_api.post(api_url, json=data)
                 
@@ -526,31 +531,9 @@ class QQBindPlugin(Star):
                     logger.error(f"上传图片到QQ服务器失败，响应: {response}")
                     return False, f"上传图片失败: {response}"
             else:
-                # 如果没有直接调用QQ API的方法，使用aiohttp发送请求
-                # 这部分需要根据实际情况调整，包括获取access_token等
-                logger.warning("未找到QQ API调用方法，尝试使用aiohttp发送请求")
-                
-                # 这里需要实现完整的QQ API调用逻辑，包括获取access_token等
-                # 由于涉及到复杂的鉴权流程，这里只是一个示例框架
-                async with aiohttp.ClientSession() as session:
-                    # 获取access_token的逻辑
-                    # ...
-                    
-                    # 发送请求
-                    headers = {
-                        "Authorization": f"Bearer {access_token}",
-                        "Content-Type": "application/json"
-                    }
-                    
-                    async with session.post("https://api.q.qq.com" + api_url, json=data, headers=headers) as response:
-                        if response.status != 200:
-                            return False, f"API请求失败，状态码: {response.status}"
-                        
-                        result = await response.json()
-                        if "file_info" in result:
-                            return True, result["file_info"]
-                        else:
-                            return False, f"上传图片失败: {result}"
+                # 如果没有直接调用QQ API的方法，记录警告并返回失败
+                logger.warning("未找到QQ API调用方法，无法上传图片到QQ服务器")
+                return False, "未找到QQ API调用方法，无法上传图片"
         except Exception as e:
             logger.error(f"上传图片到QQ服务器时出错: {e}")
             return False, f"上传图片过程出错: {str(e)}"
