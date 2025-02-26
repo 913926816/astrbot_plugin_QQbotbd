@@ -158,14 +158,21 @@ class QQBindPlugin(Star):
             "您可以随时发送 'cancel' 取消绑定流程"
         )
     
-    @filter.message()
+    @filter.event()
     async def handle_bind_flow(self, event: AstrMessageEvent):
         '''处理绑定流程中的消息'''
+        # 只处理消息事件
+        if not isinstance(event, AstrMessageEvent):
+            return
+            
+        # 忽略命令消息，因为它们会被其他处理器处理
+        message = event.message_str.strip()
+        if message.startswith('/'):
+            return
+            
         user_id = self.user_openid(event)
         if not user_id or user_id not in self.login_sessions:
             return  # 不是绑定流程中的消息
-        
-        message = event.message_str.strip()
         
         # 检查是否取消
         if message.lower() == 'cancel':
@@ -234,6 +241,41 @@ class QQBindPlugin(Star):
                 # 重置到等待QQ号步骤
                 session["step"] = "waiting_qq"
                 session["timestamp"] = time.time()
+    
+    @filter.command("qqbindsimple")
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    async def qq_bind_simple(self, event: AstrMessageEvent):
+        '''简单绑定QQ号（无需验证）- 仅管理员可用 - 使用方法: /qqbindsimple [QQ号]'''
+        user_id = self.user_openid(event)
+        if not user_id:
+            yield event.plain_result("无法获取您的用户ID，绑定失败")
+            return
+            
+        message_str = event.message_str.strip()
+        
+        # 更灵活的正则表达式，尝试多种可能的格式
+        match = re.search(r'(?:/qqbindsimple|qqbindsimple)\s*(\d{5,11})', message_str)
+        if not match:
+            # 尝试直接提取数字
+            digits_match = re.search(r'(\d{5,11})', message_str)
+            if digits_match:
+                qq_number = digits_match.group(1)
+            else:
+                yield event.plain_result("请提供正确的QQ号，格式：/qqbindsimple [QQ号]")
+                return
+        else:
+            qq_number = match.group(1)
+        
+        # 绑定QQ号到用户的OpenID
+        self.bind_data[user_id] = {
+            "qq_number": qq_number,
+            "bind_time": int(time.time()),
+            "verified": False  # 标记为未验证
+        }
+        self._save_data()
+        
+        logger.info(f"管理员为用户 {user_id} 绑定QQ号 {qq_number}")
+        yield event.plain_result(f"已为用户绑定QQ号\n用户ID：{user_id}\nQQ号：{qq_number}\n(未验证)")
     
     @filter.command("qqunbind")
     async def qq_unbind(self, event: AstrMessageEvent):
@@ -318,8 +360,10 @@ class QQBindPlugin(Star):
 管理员命令：
 1. 查询所有绑定记录：/qqlist
 2. 查询指定ID的QQ号：/whoisqq [ID]
+3. 简单绑定（无需验证）：/qqbindsimple [QQ号]
 
-注意：绑定QQ号需要进行登录验证，以确保您是QQ号的所有者。"""
+注意：绑定QQ号需要进行登录验证，以确保您是QQ号的所有者。
+如果验证失败，管理员可以使用简单绑定命令帮助您绑定。"""
         
         yield event.plain_result(help_text)
     
