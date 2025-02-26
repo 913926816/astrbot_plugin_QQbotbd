@@ -158,13 +158,10 @@ class QQBindPlugin(Star):
             "您可以随时发送 'cancel' 取消绑定流程"
         )
     
-    @filter.event()
-    async def handle_bind_flow(self, event: AstrMessageEvent):
-        '''处理绑定流程中的消息'''
-        # 只处理消息事件
-        if not isinstance(event, AstrMessageEvent):
-            return
-            
+    # 使用正则表达式过滤器来处理所有消息
+    @filter.regex(r'.*')
+    async def handle_all_messages(self, event: AstrMessageEvent):
+        '''处理所有消息，包括绑定流程中的消息'''
         # 忽略命令消息，因为它们会被其他处理器处理
         message = event.message_str.strip()
         if message.startswith('/'):
