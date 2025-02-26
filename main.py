@@ -229,25 +229,37 @@ class QQBindPlugin(Star):
             "qrcode_data": qrcode_data
         }
         
-        # 发送二维码和绑定指引
-        if qrcode_data.startswith(('http://', 'https://', 'data:')):
-            # 如果是URL或Base64编码的图片数据，直接发送
-            yield event.image_result(qrcode_data)
-        else:
-            # 如果是其他格式，尝试作为Base64编码处理
-            try:
-                # 检查是否已经是Base64编码
+        # 发送二维码图片
+        try:
+            # 如果qrcode_data是URL，尝试使用QQ官方API上传并发送
+            if qrcode_data.startswith(('http://', 'https://')):
+                # 上传图片到QQ服务器
+                upload_success, file_info = await self.upload_image_to_qq(qrcode_data, user_id)
+                
+                if upload_success:
+                    # 使用file_info发送图片消息
+                    yield event.media_result(file_info)
+                else:
+                    # 如果上传失败，回退到直接发送URL
+                    logger.warning(f"使用QQ官方API上传图片失败: {file_info}，回退到直接发送URL")
+                    yield event.image_result(qrcode_data)
+            elif qrcode_data.startswith('data:image'):
+                # 如果是Base64编码的图片数据，直接发送
+                yield event.image_result(qrcode_data)
+            else:
+                # 尝试作为Base64编码处理
                 try:
+                    # 检查是否已经是Base64编码
                     base64.b64decode(qrcode_data)
                     # 如果解码成功，说明是有效的Base64编码
                     yield event.image_result(f"data:image/png;base64,{qrcode_data}")
                 except:
                     # 如果解码失败，可能不是Base64编码，尝试直接发送
                     yield event.plain_result(f"无法显示二维码，请访问: {self.qrcode_api_url}?type=qq&session={session_id}")
-            except Exception as e:
-                logger.error(f"处理二维码数据时出错: {e}")
-                yield event.plain_result(f"处理二维码数据时出错，请重试")
-                return
+        except Exception as e:
+            logger.error(f"发送二维码图片时出错: {e}")
+            yield event.plain_result(f"发送二维码图片时出错，请重试")
+            return
         
         yield event.plain_result(
             "请使用QQ扫描上方二维码登录\n"
@@ -480,3 +492,65 @@ class QQBindPlugin(Star):
         verified = qq_data.get("verified", False)
         
         yield event.plain_result(f"ID {target_id} 绑定的QQ号为: {qq_number}\n验证状态: {'已验证' if verified else '未验证'}")
+
+    async def upload_image_to_qq(self, image_url, user_id):
+        """将图片上传到QQ服务器
+        
+        Args:
+            image_url (str): 图片URL
+            user_id (str): 用户的OpenID
+            
+        Returns:
+            tuple: (成功与否, file_info或错误消息)
+        """
+        try:
+            # 构建API请求URL
+            api_url = f"/v2/users/{user_id}/files"
+            
+            # 准备请求参数
+            data = {
+                "file_type": 1,  # 1表示图片
+                "url": image_url,
+                "srv_send_msg": False  # 不直接发送，只获取file_info
+            }
+            
+            # 发送请求
+            # 注意：这里假设AstrBot有提供调用QQ官方API的方法
+            # 如果没有，需要自行实现HTTP请求和鉴权逻辑
+            if hasattr(self.context, 'qq_api') and callable(getattr(self.context.qq_api, 'post', None)):
+                response = await self.context.qq_api.post(api_url, json=data)
+                
+                if isinstance(response, dict) and "file_info" in response:
+                    return True, response["file_info"]
+                else:
+                    logger.error(f"上传图片到QQ服务器失败，响应: {response}")
+                    return False, f"上传图片失败: {response}"
+            else:
+                # 如果没有直接调用QQ API的方法，使用aiohttp发送请求
+                # 这部分需要根据实际情况调整，包括获取access_token等
+                logger.warning("未找到QQ API调用方法，尝试使用aiohttp发送请求")
+                
+                # 这里需要实现完整的QQ API调用逻辑，包括获取access_token等
+                # 由于涉及到复杂的鉴权流程，这里只是一个示例框架
+                async with aiohttp.ClientSession() as session:
+                    # 获取access_token的逻辑
+                    # ...
+                    
+                    # 发送请求
+                    headers = {
+                        "Authorization": f"Bearer {access_token}",
+                        "Content-Type": "application/json"
+                    }
+                    
+                    async with session.post("https://api.q.qq.com" + api_url, json=data, headers=headers) as response:
+                        if response.status != 200:
+                            return False, f"API请求失败，状态码: {response.status}"
+                        
+                        result = await response.json()
+                        if "file_info" in result:
+                            return True, result["file_info"]
+                        else:
+                            return False, f"上传图片失败: {result}"
+        except Exception as e:
+            logger.error(f"上传图片到QQ服务器时出错: {e}")
+            return False, f"上传图片过程出错: {str(e)}"
