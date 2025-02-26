@@ -189,9 +189,9 @@ class QQBindPlugin(Star):
                         print(f"解析QQ API响应失败: {e}")  # 调试信息
                         return False, f"解析API响应失败: {e}", None
                     
-            except Exception as e:
-                print(f"QQ API请求失败: {e}")  # 调试信息
-                return False, f"获取二维码过程出错: {str(e)}", None
+        except Exception as e:
+            print(f"QQ API请求失败: {e}")  # 调试信息
+            return False, f"获取二维码过程出错: {str(e)}", None
 
     def _hash33(self, s):
         """计算ptqrtoken的哈希值，用于QQ登录状态检查"""
