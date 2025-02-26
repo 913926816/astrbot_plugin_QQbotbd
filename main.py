@@ -316,10 +316,10 @@ class QQBindPlugin(Star):
         # 发送二维码图片
         try:
             # 尝试使用QQ开放平台API发送图片
-            app_id = self.get_config("app_id", "")
-            app_secret = self.get_config("app_secret", "")
+            # 检查是否可以获取access_token
+            token_success, _ = await self.get_access_token()
             
-            if app_id and app_secret:
+            if token_success:
                 # 如果qrcode_data是URL，尝试上传并发送
                 if qrcode_data.startswith(('http://', 'https://')):
                     # 上传图片获取media_id
@@ -343,8 +343,8 @@ class QQBindPlugin(Star):
                     # 如果不是URL，直接使用AstrBot的方法
                     yield event.image_result(qrcode_data)
             else:
-                # 如果没有配置app_id或app_secret，使用AstrBot的方法
-                logger.info("未配置app_id或app_secret，使用AstrBot方法发送图片")
+                # 如果无法获取access_token，使用AstrBot的方法
+                logger.info("无法获取access_token，使用AstrBot方法发送图片")
                 
                 # 根据qrcode_data的格式选择合适的发送方式
                 if qrcode_data.startswith('data:image'):
@@ -824,12 +824,27 @@ class QQBindPlugin(Star):
             tuple: (成功与否, access_token或错误消息)
         """
         try:
+            # 首先尝试从插件配置中获取app_id和app_secret
             app_id = self.get_config("app_id", "")
             app_secret = self.get_config("app_secret", "")
             
+            # 如果插件配置中没有，尝试从AstrBot全局配置中获取
             if not app_id or not app_secret:
-                logger.error("未配置app_id或app_secret，无法获取access_token")
-                return False, "未配置app_id或app_secret，无法获取access_token"
+                if hasattr(self.context, 'config'):
+                    app_id = getattr(self.context.config, 'qq_app_id', '')
+                    app_secret = getattr(self.context.config, 'qq_app_secret', '')
+                    logger.info("从AstrBot全局配置中获取AppID和AppSecret")
+            
+            # 如果仍然没有，尝试从环境变量中获取
+            if not app_id or not app_secret:
+                app_id = os.environ.get('QQ_APP_ID', '')
+                app_secret = os.environ.get('QQ_APP_SECRET', '')
+                if app_id and app_secret:
+                    logger.info("从环境变量中获取AppID和AppSecret")
+            
+            if not app_id or not app_secret:
+                logger.error("未找到AppID和AppSecret，无法获取access_token")
+                return False, "未找到AppID和AppSecret，无法获取access_token"
             
             # 检查是否已有有效的access_token
             if hasattr(self, 'access_token') and hasattr(self, 'token_expires_at'):
