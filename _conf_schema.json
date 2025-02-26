@@ -2,5 +2,21 @@
   "qq_access_token": {
     "type": "string",
     "default": "abc123def456"
+  },
+  "app_id": {
+    "type": "string",
+    "default": ""
+  },
+  "app_secret": {
+    "type": "string",
+    "default": ""
+  },
+  "auto_verify": {
+    "type": "boolean",
+    "default": true
+  },
+  "qrcode_timeout": {
+    "type": "integer",
+    "default": 5
   }
 } 
