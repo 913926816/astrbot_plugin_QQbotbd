@@ -12,11 +12,11 @@
     "default": ""
   },
   "auto_verify": {
-    "type": "boolean",
+    "type": "bool",
     "default": true
   },
   "qrcode_timeout": {
-    "type": "integer",
+    "type": "int",
     "default": 5
   }
 } 
