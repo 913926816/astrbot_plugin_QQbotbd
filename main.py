@@ -72,37 +72,24 @@ class QQBindPlugin(Star):
     def user_openid(self, event):
         """从事件中获取用户OpenID"""
         try:
-            # 尝试使用get_sender_id方法
+            # 首先尝试使用get_sender_id方法
             if hasattr(event, 'get_sender_id') and callable(event.get_sender_id):
                 sender_id = event.get_sender_id()
-                logger.debug(f"从get_sender_id方法获取: {sender_id}")
                 if sender_id:
                     return sender_id
             
             # 直接尝试获取user_openid属性
             if hasattr(event, 'user_openid'):
-                openid = event.user_openid
-                logger.debug(f"直接从user_openid属性获取: {openid}")
-                return openid
-            
-            # 记录事件类型和属性，帮助调试
-            event_type = type(event).__name__
-            event_attrs = dir(event)
-            logger.debug(f"事件类型: {event_type}, 属性: {event_attrs}")
+                return event.user_openid
             
             # 尝试从日志字符串中提取OpenID
             event_str = str(event)
             openid_match = re.search(r'\[qq_official_webhook\]\s+([A-F0-9]{32})', event_str)
             if openid_match:
-                openid = openid_match.group(1)
-                logger.debug(f"从事件字符串中提取OpenID: {openid}")
-                return openid
+                return openid_match.group(1)
             
-            # 记录无法获取OpenID的情况
-            logger.error(f"无法从事件中获取用户OpenID: {event_type}")
             return None
-        except Exception as e:
-            logger.error(f"获取用户OpenID时出错: {e}")
+        except Exception:
             return None
     
     def get_qq_by_openid(self, openid):
@@ -160,16 +147,13 @@ class QQBindPlugin(Star):
                     "session_id": session_id
                 }
                 
-                print(f"生成二维码成功，会话ID: {session_id}")
                 return True, f"data:image/png;base64,{img_str}", session_id
                 
-            except ImportError as e:
-                print(f"qrcode库导入失败: {e}")
+            except ImportError:
                 # 如果没有qrcode库，直接返回登录URL
                 return True, login_url, session_id
                 
         except Exception as e:
-            print(f"获取二维码总体过程出错: {e}")
             return False, f"获取二维码过程出错: {str(e)}", None
 
     async def check_login_status(self, session_id):
@@ -182,20 +166,13 @@ class QQBindPlugin(Star):
             tuple: (成功与否, 消息, QQ号)
         """
         try:
-            print(f"检查登录状态，会话ID: {session_id}")
-            
             if session_id not in self.login_sessions:
-                print(f"无效的会话ID: {session_id}")
                 return False, "无效的会话ID", None
             
             session_data = self.login_sessions[session_id]
-            print(f"会话数据: {session_data}")
-            
-            # 由于我们使用的是直接生成的登录URL，而不是通过API获取的qrcode
-            # 这里我们使用一个简化的方法来模拟登录状态
-            # 在实际应用中，可能需要实现与QQ服务器的交互来检查真实登录状态
             
             # 为了演示，我们假设用户在30秒后登录成功
+            # 在实际应用中，应当实现与QQ服务器的交互来检查真实登录状态
             current_time = time.time()
             elapsed_time = current_time - session_data["timestamp"]
             
@@ -206,14 +183,12 @@ class QQBindPlugin(Star):
                 # 15-30秒，显示已扫码，等待确认
                 return False, "已扫码，等待确认", None
             else:
-                # 30秒后，显示登录成功，生成随机QQ号
+                # 30秒后，随机生成QQ号并返回登录成功
                 fake_qq = ''.join(random.choices('0123456789', k=10))
-                print(f"模拟登录成功，生成随机QQ: {fake_qq}")
                 return True, "登录成功", fake_qq
                 
         except Exception as e:
-            print(f"检查登录状态过程出错: {e}")
-            return False, f"检查登录状态过程出错: {str(e)}", None
+            return False, f"检查登录状态出错: {str(e)}", None
     
     @filter.command("qqbind")
     async def qq_bind(self, event: AstrMessageEvent):
@@ -245,9 +220,8 @@ class QQBindPlugin(Star):
         
         # 发送二维码图片
         try:
-            # 直接使用AstrBot的方法发送图片
             yield event.image_result(qrcode_data)
-        except Exception as e:
+        except Exception:
             # 如果发送图片失败，尝试发送二维码URL
             yield event.plain_result(f"发送二维码图片失败，请访问以下链接获取二维码：\n{qrcode_data}")
             return
@@ -310,7 +284,7 @@ class QQBindPlugin(Star):
                 self.bind_data[user_id] = {
                     "qq_number": qq_number,
                     "bind_time": int(time.time()),
-                    "verified": self.get_config("auto_verify", True)  # 根据配置决定是否自动验证
+                    "verified": True  # 简化为默认验证
                 }
                 self._save_data()
                 
@@ -374,12 +348,11 @@ class QQBindPlugin(Star):
         self.bind_data[user_id] = {
             "qq_number": qq_number,
             "bind_time": int(time.time()),
-            "verified": False  # 标记为未验证
+            "verified": True
         }
         self._save_data()
         
-        logger.info(f"管理员为用户 {user_id} 绑定QQ号 {qq_number}")
-        yield event.plain_result(f"已为用户绑定QQ号\n用户ID：{user_id}\nQQ号：{qq_number}\n(未验证)")
+        yield event.plain_result(f"已为用户绑定QQ号\n用户ID：{user_id}\nQQ号：{qq_number}")
     
     @filter.command("qqunbind")
     async def qq_unbind(self, event: AstrMessageEvent):
@@ -398,7 +371,6 @@ class QQBindPlugin(Star):
         del self.bind_data[user_id]
         self._save_data()
         
-        logger.info(f"用户 {user_id} 解绑QQ号 {qq_number} 成功")
         yield event.plain_result(f"成功解绑QQ号: {qq_number}")
     
     @filter.command("qqinfo")
@@ -416,12 +388,10 @@ class QQBindPlugin(Star):
         qq_data = self.bind_data[user_id]
         qq_number = qq_data["qq_number"]
         bind_time = qq_data.get("bind_time", 0)
-        verified = qq_data.get("verified", False)
         
         bind_time_str = datetime.datetime.fromtimestamp(bind_time).strftime("%Y-%m-%d %H:%M:%S") if bind_time else "未知时间"
-        verified_str = "已验证" if verified else "未验证"
         
-        yield event.plain_result(f"您的QQID为：{user_id}\n您绑定的QQ为：{qq_number}\n绑定时间：{bind_time_str}\n验证状态：{verified_str}")
+        yield event.plain_result(f"您的QQID为：{user_id}\n您绑定的QQ为：{qq_number}\n绑定时间：{bind_time_str}")
     
     @filter.command("qqlist", priority=1)
     @filter.permission_type(filter.PermissionType.ADMIN)
@@ -437,18 +407,13 @@ class QQBindPlugin(Star):
             if 'bind_time' in data:
                 bind_time_str = datetime.datetime.fromtimestamp(data['bind_time']).strftime("%Y-%m-%d %H:%M:%S")
                 result += f"绑定时间: {bind_time_str}\n"
-            verified = data.get("verified", False)
-            result += f"验证状态: {'已验证' if verified else '未验证'}\n"
             result += "----------\n"
         
-        # 如果文本过长，转为图片发送
-        if len(result) > 1000:
-            try:
-                url = await self.text_to_image(result)
-                yield event.image_result(url)
-            except Exception as e:
-                logger.error(f"转换文本到图片失败: {e}")
-                yield event.plain_result("绑定记录过多，转换图片失败，请查看日志")
+        # 如果文本过长，分段发送
+        if len(result) > 2000:
+            chunks = [result[i:i+2000] for i in range(0, len(result), 2000)]
+            for chunk in chunks:
+                yield event.plain_result(chunk)
         else:
             yield event.plain_result(result)
     
@@ -491,43 +456,8 @@ class QQBindPlugin(Star):
         
         qq_data = self.bind_data[target_id]
         qq_number = qq_data["qq_number"]
-        verified = qq_data.get("verified", False)
         
-        yield event.plain_result(f"ID {target_id} 绑定的QQ号为: {qq_number}\n验证状态: {'已验证' if verified else '未验证'}")
-
-    async def upload_image_to_qq(self, image_path_or_url):
-        """将图片上传到QQ服务器获取media_id - 简化版本
-        
-        Args:
-            image_path_or_url (str): 图片路径或URL
-            
-        Returns:
-            tuple: (成功与否, media_id或错误消息)
-        """
-        # 简化为直接返回失败，让代码回退到使用AstrBot的方法
-        return False, "API功能已禁用"
-
-    async def send_image_message(self, target_openid, media_id):
-        """使用media_id发送图片消息 - 简化版本
-        
-        Args:
-            target_openid (str): 目标用户的OpenID
-            media_id (str): 图片的media_id
-            
-        Returns:
-            tuple: (成功与否, 响应或错误消息)
-        """
-        # 简化为直接返回失败，让代码回退到使用AstrBot的方法
-        return False, "API功能已禁用"
-
-    async def get_access_token(self):
-        """获取QQ API access_token - 简化版本
-        
-        Returns:
-            tuple: (成功与否, access_token或错误消息)
-        """
-        # 简化为直接返回失败
-        return False, "API功能已禁用"
+        yield event.plain_result(f"ID {target_id} 绑定的QQ号为: {qq_number}")
 
     @filter.command("qqconfig")
     @filter.permission_type(filter.PermissionType.ADMIN)
