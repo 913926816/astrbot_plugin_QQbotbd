@@ -90,10 +90,10 @@ class QQBindPlugin(Star):
                 return event.open_id
             
             # 尝试从日志字符串中提取OpenID
-            event_str = str(event)
-            openid_match = re.search(r'\[qq_official_webhook\]\s+([A-F0-9]{32})', event_str)
-            if openid_match:
-                return openid_match.group(1)
+            # event_str = str(event)
+            # openid_match = re.search(r'\[qq_official_webhook\]\s+([A-F0-9]{32})', event_str)
+            # if openid_match:
+            #     return openid_match.group(1)
             
             return None
         except Exception:
@@ -133,8 +133,9 @@ class QQBindPlugin(Star):
             }
             
             async with aiohttp.ClientSession() as session:
-                create_url = "https://q.qq.com/qrcode/create"
-                data = {"type": "777"}
+                async def get_qrcode(self):
+                create_url = "https://q.qq.com/qrcode/create"  # 修正接口地址
+                data = {"type": 777}  # 数值类型应为整数
                 
                 async with session.post(create_url, json=data, headers=headers) as response:
                     if response.status != 200:
@@ -148,7 +149,8 @@ class QQBindPlugin(Star):
                             return False, "获取qrcode失败", None
                         
                         # 构建登录URL
-                        login_url = f"https://q.qq.com/login/applist?client=qq&code={qrcode}&ticket=null"
+                        ticket = result.get("ticket")  # 新增ticket获取
+                        login_url = f"https://q.qq.com/login/applist?client=qq&code={qrcode}&ticket={ticket}"
                         
                         # 将登录URL转换为二维码图片
                         try:
@@ -177,14 +179,8 @@ class QQBindPlugin(Star):
                             return True, f"data:image/png;base64,{img_str}", session_id
                             
                         except ImportError:
-                            # 如果没有qrcode库，尝试使用其他方式生成二维码
-                            try:
-                                # 使用API直接生成二维码
-                                qr_api_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={login_url}"
-                                return True, qr_api_url, session_id
-                            except:
-                                # 如果API也失败，返回纯文本登录URL
-                                return True, login_url, session_id
+                            # 如果没有qrcode库，直接返回登录URL
+                            return True, login_url, session_id
                             
                     except Exception as e:
                         return False, f"解析API响应失败: {e}", None
@@ -218,8 +214,18 @@ class QQBindPlugin(Star):
             }
             
             async with aiohttp.ClientSession() as session:
+                async def check_login_status(self, session_id):
+                session_data = self.login_sessions[session_id]
+                qrcode = session_data.get("qrcode")
+                ticket = session_data.get("ticket")  # 新增ticket获取
+    
                 check_url = "https://q.qq.com/qrcode/get"
-                data = {"qrcode": qrcode}
+                params = {  # 使用URL参数传递
+                    "qrcode": qrcode,
+                    "ticket": ticket
+    }
+    
+    async with session.get(check_url, params=params, headers=headers) as response:
                 
                 async with session.post(check_url, json=data, headers=headers) as response:
                     if response.status != 200:
