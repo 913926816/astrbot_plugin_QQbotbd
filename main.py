@@ -142,43 +142,57 @@ class QQBindPlugin(Star):
                     if response.status != 200:
                         return False, f"创建二维码失败，状态码: {response.status}", None
                     
-                    result = await response.json()
-                    qrcode = result.get("qrcode")
-                    if not qrcode:
-                        return False, "获取qrcode失败", None
+                    # 打印完整响应以调试
+                    response_text = await response.text()
+                    print(f"QQ API返回: {response_text}")
                     
-                    # 构建登录URL
-                    login_url = f"https://q.qq.com/login/applist?client=qq&code={qrcode}&ticket=null"
-                    
-                    # 将登录URL转换为二维码图片
                     try:
-                        import qrcode
-                        from io import BytesIO
+                        result = await response.json()
+                        print(f"解析JSON结果: {result}")
                         
-                        # 创建二维码图片
-                        qr = qrcode.QRCode(version=1, box_size=10, border=5)
-                        qr.add_data(login_url)
-                        qr.make(fit=True)
+                        # 检查响应中的各种可能键名
+                        qrcode = result.get("qrcode") or result.get("data", {}).get("qrcode") or result.get("code")
                         
-                        # 生成图片
-                        img = qr.make_image(fill_color="black", back_color="white")
+                        if not qrcode:
+                            # 如果没有找到qrcode，返回整个响应内容作为错误信息
+                            return False, f"获取qrcode失败，API返回: {response_text}", None
                         
-                        # 将图片转换为base64
-                        buffered = BytesIO()
-                        img.save(buffered, format="PNG")
-                        img_str = base64.b64encode(buffered.getvalue()).decode()
+                        # 构建登录URL
+                        login_url = f"https://q.qq.com/login/applist?client=qq&code={qrcode}&ticket=null"
                         
-                        # 保存qrcode用于后续状态检查
-                        self.login_sessions[session_id] = {
-                            "qrcode": qrcode,
-                            "timestamp": time.time()
-                        }
+                        # 将登录URL转换为二维码图片
+                        try:
+                            import qrcode as qrcode_lib
+                            from io import BytesIO
+                            
+                            # 创建二维码图片
+                            qr = qrcode_lib.QRCode(version=1, box_size=10, border=5)
+                            qr.add_data(login_url)
+                            qr.make(fit=True)
+                            
+                            # 生成图片
+                            img = qr.make_image(fill_color="black", back_color="white")
+                            
+                            # 将图片转换为base64
+                            buffered = BytesIO()
+                            img.save(buffered, format="PNG")
+                            img_str = base64.b64encode(buffered.getvalue()).decode()
+                            
+                            # 保存qrcode用于后续状态检查
+                            self.login_sessions[session_id] = {
+                                "qrcode": qrcode,
+                                "timestamp": time.time()
+                            }
+                            
+                            return True, f"data:image/png;base64,{img_str}", session_id
+                            
+                        except ImportError:
+                            # 如果没有qrcode库，返回登录URL
+                            return True, login_url, session_id
                         
-                        return True, f"data:image/png;base64,{img_str}", session_id
-                        
-                    except ImportError:
-                        # 如果没有qrcode库，返回登录URL
-                        return True, login_url, session_id
+                    except Exception as e:
+                        # JSON解析失败
+                        return False, f"解析API响应失败: {e}, 响应内容: {response_text}", None
                 
         except Exception as e:
             return False, f"获取二维码过程出错: {str(e)}", None
