@@ -119,40 +119,58 @@ class QQBindPlugin(Star):
             # 生成一个唯一的会话ID
             session_id = self.generate_session_id()
             
-            # 直接生成QQ登录URL
-            login_url = f"https://ssl.ptlogin2.qq.com/ptqrshow?appid=716027609&e=2&l=M&s=4&d=72&v=4&t={random.random()}&pt_3rd_aid=100613268"
-            
-            # 将登录URL转换为二维码图片
-            try:
-                import qrcode as qrcode_lib
-                from io import BytesIO
+            # 使用q.qq.com/qrcode/create接口获取qrcode
+            async with aiohttp.ClientSession() as session:
+                create_url = "https://q.qq.com/qrcode/create"
+                data = {"type": "777"}
                 
-                # 创建二维码图片
-                qr = qrcode_lib.QRCode(version=1, box_size=10, border=5)
-                qr.add_data(login_url)
-                qr.make(fit=True)
-                
-                # 生成图片
-                img = qr.make_image(fill_color="black", back_color="white")
-                
-                # 将图片转换为base64
-                buffered = BytesIO()
-                img.save(buffered, format="PNG")
-                img_str = base64.b64encode(buffered.getvalue()).decode()
-                
-                # 保存会话信息
-                self.login_sessions[session_id] = {
-                    "timestamp": time.time(),
-                    "login_url": login_url,
-                    "session_id": session_id
-                }
-                
-                return True, f"data:image/png;base64,{img_str}", session_id
-                
-            except ImportError:
-                # 如果没有qrcode库，直接返回登录URL
-                return True, login_url, session_id
-                
+                async with session.post(create_url, json=data) as response:
+                    if response.status != 200:
+                        return False, f"创建二维码失败，状态码: {response.status}", None
+                    
+                    try:
+                        result = await response.json()
+                        qrcode = result.get("qrcode")
+                        
+                        if not qrcode:
+                            return False, "获取qrcode失败", None
+                        
+                        # 构建登录URL
+                        login_url = f"https://q.qq.com/login/applist?client=qq&code={qrcode}&ticket=null"
+                        
+                        # 将登录URL转换为二维码图片
+                        try:
+                            import qrcode as qrcode_lib
+                            from io import BytesIO
+                            
+                            # 创建二维码图片
+                            qr = qrcode_lib.QRCode(version=1, box_size=10, border=5)
+                            qr.add_data(login_url)
+                            qr.make(fit=True)
+                            
+                            # 生成图片
+                            img = qr.make_image(fill_color="black", back_color="white")
+                            
+                            # 将图片转换为base64
+                            buffered = BytesIO()
+                            img.save(buffered, format="PNG")
+                            img_str = base64.b64encode(buffered.getvalue()).decode()
+                            
+                            # 保存qrcode用于后续状态检查
+                            self.login_sessions[session_id] = {
+                                "qrcode": qrcode,
+                                "timestamp": time.time()
+                            }
+                            
+                            return True, f"data:image/png;base64,{img_str}", session_id
+                            
+                        except ImportError:
+                            # 如果没有qrcode库，返回登录URL
+                            return True, login_url, session_id
+                            
+                    except Exception as e:
+                        return False, f"解析API响应失败: {e}", None
+                    
         except Exception as e:
             return False, f"获取二维码过程出错: {str(e)}", None
 
@@ -170,23 +188,39 @@ class QQBindPlugin(Star):
                 return False, "无效的会话ID", None
             
             session_data = self.login_sessions[session_id]
+            qrcode = session_data.get("qrcode")
             
-            # 为了演示，我们假设用户在30秒后登录成功
-            # 在实际应用中，应当实现与QQ服务器的交互来检查真实登录状态
-            current_time = time.time()
-            elapsed_time = current_time - session_data["timestamp"]
+            if not qrcode:
+                return False, "无效的qrcode", None
             
-            if elapsed_time < 15:
-                # 15秒内，显示等待扫码
-                return False, "等待扫码中...", None
-            elif elapsed_time < 30:
-                # 15-30秒，显示已扫码，等待确认
-                return False, "已扫码，等待确认", None
-            else:
-                # 30秒后，随机生成QQ号并返回登录成功
-                fake_qq = ''.join(random.choices('0123456789', k=10))
-                return True, "登录成功", fake_qq
+            # 使用q.qq.com/qrcode/get接口检查登录状态
+            async with aiohttp.ClientSession() as session:
+                check_url = "https://q.qq.com/qrcode/get"
+                data = {"qrcode": qrcode}
                 
+                async with session.post(check_url, json=data) as response:
+                    if response.status != 200:
+                        return False, f"检查登录状态失败，状态码: {response.status}", None
+                    
+                    try:
+                        result = await response.json()
+                        status = result.get("status")
+                        
+                        if status == "scanned":
+                            return False, "已扫码，等待确认", None
+                        elif status == "confirmed":
+                            qq_number = result.get("qq")
+                            if not qq_number:
+                                qq_number = result.get("qq_number")
+                            if not qq_number:
+                                qq_number = f"unknown_{int(time.time())}"
+                            return True, "登录成功", qq_number
+                        else:
+                            return False, "等待扫码", None
+                            
+                    except Exception as e:
+                        return False, f"解析响应失败: {e}", None
+                    
         except Exception as e:
             return False, f"检查登录状态出错: {str(e)}", None
     
