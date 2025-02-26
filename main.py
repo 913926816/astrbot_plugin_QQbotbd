@@ -32,7 +32,26 @@ class QQBindPlugin(Star):
         self.data_file = os.path.join(os.path.dirname(__file__), "qqbind_data.json")
         self.config_file = os.path.join(os.path.dirname(__file__), "config.json")
         self.bind_data = self._load_data()
-        self.config = self._load_config()
+        
+        # 尝试从AstrBot配置系统中读取配置
+        try:
+            if hasattr(context, 'get_plugin_config') and callable(context.get_plugin_config):
+                # 如果AstrBot提供了get_plugin_config方法，使用它获取配置
+                astrbot_config = context.get_plugin_config("astrbot_plugin_QQbotbd")
+                if astrbot_config:
+                    # 将AstrBot配置合并到本地配置
+                    self.config = self._merge_config(astrbot_config)
+                    logger.info("已从AstrBot配置系统加载配置")
+                else:
+                    # 如果AstrBot没有配置，使用本地配置
+                    self.config = self._load_config()
+            else:
+                # 如果AstrBot没有提供get_plugin_config方法，使用本地配置
+                self.config = self._load_config()
+        except Exception as e:
+            logger.error(f"从AstrBot配置系统加载配置失败: {e}")
+            self.config = self._load_config()
+        
         self.login_sessions = {}  # 存储登录会话信息
         self.api_base_url = "https://api.yuafeng.cn/API/ly"
         self.qrcode_api_url = f"{self.api_base_url}/qrcode.php"  # 二维码获取接口
@@ -297,8 +316,10 @@ class QQBindPlugin(Star):
         # 发送二维码图片
         try:
             # 尝试使用QQ开放平台API发送图片
-            access_token = self.get_config("qq_access_token", "")
-            if access_token:
+            app_id = self.get_config("app_id", "")
+            app_secret = self.get_config("app_secret", "")
+            
+            if app_id and app_secret:
                 # 如果qrcode_data是URL，尝试上传并发送
                 if qrcode_data.startswith(('http://', 'https://')):
                     # 上传图片获取media_id
@@ -322,8 +343,8 @@ class QQBindPlugin(Star):
                     # 如果不是URL，直接使用AstrBot的方法
                     yield event.image_result(qrcode_data)
             else:
-                # 如果没有配置access_token，使用AstrBot的方法
-                logger.info("未配置QQ access_token，使用AstrBot方法发送图片")
+                # 如果没有配置app_id或app_secret，使用AstrBot的方法
+                logger.info("未配置app_id或app_secret，使用AstrBot方法发送图片")
                 
                 # 根据qrcode_data的格式选择合适的发送方式
                 if qrcode_data.startswith('data:image'):
@@ -605,19 +626,18 @@ class QQBindPlugin(Star):
             tuple: (成功与否, media_id或错误消息)
         """
         try:
-            # 检查是否有access_token
-            if not hasattr(self, 'access_token') or not self.access_token:
-                # 尝试从配置中获取access_token
-                if hasattr(self.context, 'config') and 'qq_access_token' in self.context.config:
-                    self.access_token = self.context.config['qq_access_token']
-                else:
-                    return False, "未配置QQ access_token，无法上传图片"
+            # 获取access_token
+            token_success, token_result = await self.get_access_token()
+            if not token_success:
+                return False, token_result
+            
+            access_token = token_result
             
             # 构建API请求URL
             api_url = "https://api.q.qq.com/api/media/upload"
             
             async with aiohttp.ClientSession() as session:
-                headers = {"Authorization": f"Bearer {self.access_token}"}
+                headers = {"Authorization": f"Bearer {access_token}"}
                 
                 # 根据输入类型选择上传方式
                 if image_path_or_url.startswith(('http://', 'https://')):
@@ -685,20 +705,19 @@ class QQBindPlugin(Star):
             tuple: (成功与否, 响应或错误消息)
         """
         try:
-            # 检查是否有access_token
-            if not hasattr(self, 'access_token') or not self.access_token:
-                # 尝试从配置中获取access_token
-                if hasattr(self.context, 'config') and 'qq_access_token' in self.context.config:
-                    self.access_token = self.context.config['qq_access_token']
-                else:
-                    return False, "未配置QQ access_token，无法发送图片"
+            # 获取access_token
+            token_success, token_result = await self.get_access_token()
+            if not token_success:
+                return False, token_result
+            
+            access_token = token_result
             
             # 构建API请求URL
             api_url = "https://api.q.qq.com/api/v2/bot/message/send"
             
             # 准备请求数据
             data = {
-                "access_token": self.access_token,
+                "access_token": access_token,
                 "msg_type": "image",
                 "content": {"media_id": media_id},
                 "target": {"openid": target_openid}
@@ -770,3 +789,79 @@ class QQBindPlugin(Star):
         # 设置配置项
         self.set_config(key, value)
         yield event.plain_result(f"已设置配置项 {key} 的值为: {value}")
+
+    def _merge_config(self, astrbot_config):
+        """将AstrBot配置合并到本地配置
+        
+        Args:
+            astrbot_config (dict): AstrBot配置
+            
+        Returns:
+            dict: 合并后的配置
+        """
+        # 加载本地配置
+        local_config = self._load_config()
+        
+        # 将AstrBot配置合并到本地配置
+        for key, value in astrbot_config.items():
+            if key in DEFAULT_CONFIG:
+                local_config[key] = value
+        
+        # 保存合并后的配置
+        try:
+            with open(self.config_file, "w", encoding="utf-8") as f:
+                json.dump(local_config, f, ensure_ascii=False, indent=2)
+            logger.debug("配置保存成功")
+        except Exception as e:
+            logger.error(f"保存配置失败: {e}")
+        
+        return local_config
+
+    async def get_access_token(self):
+        """获取QQ API access_token
+        
+        Returns:
+            tuple: (成功与否, access_token或错误消息)
+        """
+        try:
+            app_id = self.get_config("app_id", "")
+            app_secret = self.get_config("app_secret", "")
+            
+            if not app_id or not app_secret:
+                logger.error("未配置app_id或app_secret，无法获取access_token")
+                return False, "未配置app_id或app_secret，无法获取access_token"
+            
+            # 检查是否已有有效的access_token
+            if hasattr(self, 'access_token') and hasattr(self, 'token_expires_at'):
+                # 如果token还有超过10分钟的有效期，直接使用
+                if time.time() + 600 < self.token_expires_at:
+                    return True, self.access_token
+            
+            # 获取新的access_token
+            url = "https://api.q.qq.com/api/getToken"
+            params = {
+                "grant_type": "client_credential",
+                "appid": app_id,
+                "secret": app_secret
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params) as response:
+                    if response.status != 200:
+                        logger.error(f"获取access_token失败，状态码: {response.status}")
+                        return False, f"获取access_token失败，状态码: {response.status}"
+                    
+                    result = await response.json()
+                    if "access_token" not in result:
+                        logger.error(f"获取access_token失败: {result}")
+                        return False, f"获取access_token失败: {result}"
+                    
+                    # 保存access_token和过期时间
+                    self.access_token = result["access_token"]
+                    # 假设token有效期为2小时，提前10分钟刷新
+                    self.token_expires_at = time.time() + 7200 - 600
+                    logger.info("成功获取access_token")
+                    return True, self.access_token
+        except Exception as e:
+            logger.error(f"获取access_token时出错: {e}")
+            return False, f"获取access_token时出错: {str(e)}"
