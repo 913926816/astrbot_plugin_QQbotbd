@@ -12,7 +12,7 @@ import hashlib
 import random
 import string
 
-@register("qqbind", "QQ绑定插件", "一个通过登录验证绑定QQ号的插件", "1.0.0", "https://github.com/yourusername/astrbot_plugin_QQbotbd")
+@register("qqbind", "QQ绑定插件", "一个通过二维码登录绑定QQ号的插件", "1.0.0", "https://github.com/yourusername/astrbot_plugin_QQbotbd")
 class QQBindPlugin(Star):
     def __init__(self, context: Context):
         """初始化QQ绑定插件
@@ -24,7 +24,9 @@ class QQBindPlugin(Star):
         self.data_file = os.path.join(os.path.dirname(__file__), "qqbind_data.json")
         self.bind_data = self._load_data()
         self.login_sessions = {}  # 存储登录会话信息
-        self.api_url = "https://api.yuafeng.cn/API/ly/music_login.php"
+        self.api_base_url = "https://api.yuafeng.cn/API/ly"
+        self.qrcode_api_url = f"{self.api_base_url}/qrcode.php"  # 二维码获取接口
+        self.check_login_api_url = f"{self.api_base_url}/check_login.php"  # 检查登录状态接口
         logger.info(f"QQ绑定插件已加载，数据条目数: {len(self.bind_data)}")
     
     def _load_data(self):
@@ -100,12 +102,40 @@ class QQBindPlugin(Star):
         """生成随机会话ID"""
         return ''.join(random.choices(string.ascii_letters + string.digits, k=16))
     
-    async def verify_qq_login(self, qq, password):
-        """验证QQ登录
+    async def get_qrcode(self):
+        """获取QQ登录二维码
+        
+        Returns:
+            tuple: (成功与否, 二维码URL或错误消息, 会话标识)
+        """
+        try:
+            async with aiohttp.ClientSession() as session:
+                params = {
+                    "type": "qq",  # 指定为QQ登录
+                }
+                
+                async with session.get(self.qrcode_api_url, params=params) as response:
+                    if response.status != 200:
+                        return False, f"API请求失败，状态码: {response.status}", None
+                    
+                    data = await response.json()
+                    logger.debug(f"获取二维码API返回: {data}")
+                    
+                    if data.get("code") == 1:  # 假设1是成功状态码
+                        qrcode_url = data.get("qrcode_url")
+                        session_id = data.get("session_id")
+                        return True, qrcode_url, session_id
+                    else:
+                        return False, data.get("msg", "获取二维码失败，未知原因"), None
+        except Exception as e:
+            logger.error(f"获取QQ登录二维码时出错: {e}")
+            return False, f"获取二维码过程出错: {str(e)}", None
+    
+    async def check_login_status(self, session_id):
+        """检查QQ登录状态
         
         Args:
-            qq (str): QQ号
-            password (str): 密码
+            session_id (str): 会话标识
             
         Returns:
             tuple: (成功与否, 消息, QQ号)
@@ -113,25 +143,26 @@ class QQBindPlugin(Star):
         try:
             async with aiohttp.ClientSession() as session:
                 params = {
-                    "type": "qq",  # 根据API文档，需要提供type参数
-                    "uin": qq,
-                    "pwd": password
+                    "session_id": session_id,
                 }
                 
-                async with session.get(self.api_url, params=params) as response:
+                async with session.get(self.check_login_api_url, params=params) as response:
                     if response.status != 200:
                         return False, f"API请求失败，状态码: {response.status}", None
                     
                     data = await response.json()
-                    logger.debug(f"QQ登录API返回: {data}")
+                    logger.debug(f"检查登录状态API返回: {data}")
                     
-                    if data.get("code") == 1:  # 假设1是成功状态码
-                        return True, "登录成功", qq
+                    if data.get("code") == 1:  # 登录成功
+                        qq_number = data.get("qq_number")
+                        return True, "登录成功", qq_number
+                    elif data.get("code") == 0:  # 未登录
+                        return False, "等待扫码登录", None
                     else:
-                        return False, data.get("msg", "登录失败，未知原因"), None
+                        return False, data.get("msg", "检查登录状态失败，未知原因"), None
         except Exception as e:
-            logger.error(f"验证QQ登录时出错: {e}")
-            return False, f"验证过程出错: {str(e)}", None
+            logger.error(f"检查QQ登录状态时出错: {e}")
+            return False, f"检查登录状态过程出错: {str(e)}", None
     
     @filter.command("qqbind")
     async def qq_bind(self, event: AstrMessageEvent):
@@ -141,24 +172,93 @@ class QQBindPlugin(Star):
             yield event.plain_result("无法获取您的用户ID，绑定失败")
             return
         
-        # 生成会话ID
-        session_id = self.generate_session_id()
+        # 检查是否已经绑定
+        if user_id in self.bind_data:
+            qq_number = self.bind_data[user_id]["qq_number"]
+            yield event.plain_result(f"您已绑定QQ号: {qq_number}\n如需重新绑定，请先使用 /qqunbind 解绑")
+            return
+        
+        # 获取QQ登录二维码
+        success, qrcode_or_msg, session_id = await self.get_qrcode()
+        
+        if not success:
+            yield event.plain_result(f"获取QQ登录二维码失败: {qrcode_or_msg}")
+            return
+        
+        # 保存会话信息
         self.login_sessions[user_id] = {
             "session_id": session_id,
-            "step": "waiting_qq",
-            "timestamp": time.time()
+            "timestamp": time.time(),
+            "qrcode_url": qrcode_or_msg
         }
         
-        # 发送绑定指引
+        # 发送二维码和绑定指引
+        yield event.image_result(qrcode_or_msg)
         yield event.plain_result(
-            "请按照以下步骤进行QQ绑定：\n"
-            "1. 请发送您的QQ号\n"
-            "2. 然后我们会要求您提供验证信息\n"
-            "3. 验证成功后，您的QQ号将被绑定到您的账号\n\n"
-            "您可以随时发送 'cancel' 取消绑定流程"
+            "请使用QQ扫描上方二维码登录\n"
+            "登录成功后，您的QQ号将自动绑定到您的账号\n"
+            "二维码有效期为5分钟，请尽快扫码\n\n"
+            "您可以发送 'cancel' 取消绑定流程"
         )
+        
+        # 启动异步任务检查登录状态
+        asyncio.create_task(self.poll_login_status(event, user_id))
     
-    # 使用正则表达式过滤器来处理所有消息
+    async def poll_login_status(self, event, user_id):
+        """轮询检查登录状态
+        
+        Args:
+            event (AstrMessageEvent): 原始消息事件
+            user_id (str): 用户ID
+        """
+        if user_id not in self.login_sessions:
+            return
+            
+        session = self.login_sessions[user_id]
+        session_id = session["session_id"]
+        start_time = session["timestamp"]
+        
+        # 最多轮询30次，每次间隔10秒，总共5分钟
+        for _ in range(30):
+            # 检查会话是否已被取消
+            if user_id not in self.login_sessions:
+                return
+                
+            # 检查是否超时
+            if time.time() - start_time > 300:  # 5分钟超时
+                if user_id in self.login_sessions:
+                    del self.login_sessions[user_id]
+                await event.reply("QQ登录二维码已过期，请重新发送 /qqbind 获取新的二维码")
+                return
+            
+            # 检查登录状态
+            success, msg, qq_number = await self.check_login_status(session_id)
+            
+            if success and qq_number:
+                # 登录成功，绑定QQ号
+                self.bind_data[user_id] = {
+                    "qq_number": qq_number,
+                    "bind_time": int(time.time()),
+                    "verified": True
+                }
+                self._save_data()
+                
+                # 清除会话
+                if user_id in self.login_sessions:
+                    del self.login_sessions[user_id]
+                
+                logger.info(f"用户 {user_id} 通过二维码登录绑定QQ号 {qq_number} 成功")
+                await event.reply(f"登录成功！\n您的QQID为：{user_id}\n您绑定的QQ为：{qq_number}")
+                return
+            
+            # 等待10秒后再次检查
+            await asyncio.sleep(10)
+        
+        # 超过最大轮询次数，仍未登录成功
+        if user_id in self.login_sessions:
+            del self.login_sessions[user_id]
+        await event.reply("登录超时，请重新发送 /qqbind 获取新的二维码")
+    
     @filter.regex(r'.*')
     async def handle_all_messages(self, event: AstrMessageEvent):
         '''处理所有消息，包括绑定流程中的消息'''
@@ -176,68 +276,6 @@ class QQBindPlugin(Star):
             del self.login_sessions[user_id]
             yield event.plain_result("已取消绑定流程")
             return
-        
-        session = self.login_sessions[user_id]
-        
-        # 检查会话是否过期（30分钟）
-        if time.time() - session["timestamp"] > 1800:
-            del self.login_sessions[user_id]
-            yield event.plain_result("绑定会话已过期，请重新开始绑定流程")
-            return
-        
-        # 根据当前步骤处理消息
-        if session["step"] == "waiting_qq":
-            # 验证QQ号格式
-            if not re.match(r'^\d{5,11}$', message):
-                yield event.plain_result("请输入有效的QQ号（5-11位数字）")
-                return
-            
-            # 保存QQ号并进入下一步
-            session["qq"] = message
-            session["step"] = "waiting_password"
-            session["timestamp"] = time.time()
-            
-            yield event.plain_result(
-                f"已记录QQ号: {message}\n"
-                "请输入您的QQ密码进行验证\n"
-                "注意：我们不会存储您的密码，仅用于验证您是QQ号的所有者"
-            )
-            
-        elif session["step"] == "waiting_password":
-            # 保存密码并进行验证
-            password = message
-            qq = session["qq"]
-            
-            # 发送验证中消息
-            yield event.plain_result("正在验证QQ登录信息，请稍候...")
-            
-            # 验证QQ登录
-            success, msg, verified_qq = await self.verify_qq_login(qq, password)
-            
-            # 清除会话中的敏感信息
-            if "password" in session:
-                del session["password"]
-            
-            if success:
-                # 绑定QQ号
-                self.bind_data[user_id] = {
-                    "qq_number": verified_qq,
-                    "bind_time": int(time.time()),
-                    "verified": True
-                }
-                self._save_data()
-                
-                # 清除会话
-                del self.login_sessions[user_id]
-                
-                logger.info(f"用户 {user_id} 通过登录验证绑定QQ号 {verified_qq} 成功")
-                yield event.plain_result(f"验证成功！\n您的QQID为：{user_id}\n您绑定的QQ为：{verified_qq}")
-            else:
-                # 验证失败，返回错误信息
-                yield event.plain_result(f"验证失败: {msg}\n请重新尝试或发送 'cancel' 取消绑定")
-                # 重置到等待QQ号步骤
-                session["step"] = "waiting_qq"
-                session["timestamp"] = time.time()
     
     @filter.command("qqbindsimple")
     @filter.permission_type(filter.PermissionType.ADMIN)
@@ -349,7 +387,7 @@ class QQBindPlugin(Star):
     async def qq_help(self, event: AstrMessageEvent):
         '''QQ绑定插件帮助 - 使用方法: /qqhelp'''
         help_text = """QQ绑定插件使用帮助：
-1. 开始绑定流程：/qqbind
+1. 开始绑定流程：/qqbind (将生成二维码，扫码登录后自动绑定)
 2. 解绑QQ号：/qqunbind
 3. 查询绑定信息：/qqinfo
 4. 查看帮助：/qqhelp
@@ -359,8 +397,8 @@ class QQBindPlugin(Star):
 2. 查询指定ID的QQ号：/whoisqq [ID]
 3. 简单绑定（无需验证）：/qqbindsimple [QQ号]
 
-注意：绑定QQ号需要进行登录验证，以确保您是QQ号的所有者。
-如果验证失败，管理员可以使用简单绑定命令帮助您绑定。"""
+注意：绑定QQ号需要扫描二维码登录，以确保您是QQ号的所有者。
+如果二维码登录失败，管理员可以使用简单绑定命令帮助您绑定。"""
         
         yield event.plain_result(help_text)
     
