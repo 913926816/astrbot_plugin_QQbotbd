@@ -824,27 +824,9 @@ class QQBindPlugin(Star):
             tuple: (成功与否, access_token或错误消息)
         """
         try:
-            # 首先尝试从插件配置中获取app_id和app_secret
-            app_id = self.get_config("app_id", "")
-            app_secret = self.get_config("app_secret", "")
-            
-            # 如果插件配置中没有，尝试从AstrBot全局配置中获取
-            if not app_id or not app_secret:
-                if hasattr(self.context, 'config'):
-                    app_id = getattr(self.context.config, 'qq_app_id', '')
-                    app_secret = getattr(self.context.config, 'qq_app_secret', '')
-                    logger.info("从AstrBot全局配置中获取AppID和AppSecret")
-            
-            # 如果仍然没有，尝试从环境变量中获取
-            if not app_id or not app_secret:
-                app_id = os.environ.get('QQ_APP_ID', '')
-                app_secret = os.environ.get('QQ_APP_SECRET', '')
-                if app_id and app_secret:
-                    logger.info("从环境变量中获取AppID和AppSecret")
-            
-            if not app_id or not app_secret:
-                logger.error("未找到AppID和AppSecret，无法获取access_token")
-                return False, "未找到AppID和AppSecret，无法获取access_token"
+            # 硬编码AppID和AppSecret
+            app_id = "你的AppID"  # 替换为您的实际AppID
+            app_secret = "你的AppSecret"  # 替换为您的实际AppSecret
             
             # 检查是否已有有效的access_token
             if hasattr(self, 'access_token') and hasattr(self, 'token_expires_at'):
