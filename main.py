@@ -11,6 +11,7 @@ import asyncio
 import hashlib
 import random
 import string
+import base64
 
 @register("qqbind", "QQ绑定插件", "一个通过二维码登录绑定QQ号的插件", "1.0.0", "https://github.com/yourusername/astrbot_plugin_QQbotbd")
 class QQBindPlugin(Star):
@@ -106,17 +107,51 @@ class QQBindPlugin(Star):
         """获取QQ登录二维码
         
         Returns:
-            tuple: (成功与否, 二维码URL或错误消息, 会话标识)
+            tuple: (成功与否, 二维码图片数据或错误消息, 会话标识)
         """
         try:
             # 生成一个唯一的会话ID
             session_id = self.generate_session_id()
             
-            # 构建二维码URL
-            qrcode_url = f"{self.api_base_url}/qrcode.php?type=qq&session={session_id}"
+            # 构建API请求URL
+            api_url = f"{self.api_base_url}/qrcode.php"
             
-            # 直接返回二维码URL和会话ID
-            logger.debug(f"生成二维码URL: {qrcode_url}")
+            async with aiohttp.ClientSession() as session:
+                params = {
+                    "type": "qq",
+                    "session": session_id,
+                    "return_type": "json"  # 尝试请求JSON格式的响应
+                }
+                
+                async with session.get(api_url, params=params) as response:
+                    if response.status != 200:
+                        return False, f"API请求失败，状态码: {response.status}", None
+                    
+                    # 尝试解析响应
+                    try:
+                        # 首先尝试解析为JSON
+                        data = await response.json()
+                        logger.debug(f"获取二维码API返回JSON: {data}")
+                        
+                        # 检查是否包含qr_Img字段
+                        if "qr_Img" in data:
+                            qr_img = data["qr_Img"]
+                            logger.debug(f"从JSON响应中获取到二维码图片: {qr_img[:30]}...")
+                            return True, qr_img, session_id
+                    except:
+                        # 如果解析JSON失败，尝试获取原始响应
+                        content = await response.read()
+                        logger.debug(f"获取二维码API返回二进制数据，长度: {len(content)}")
+                        
+                        # 假设返回的是图片数据
+                        if content and len(content) > 100:  # 简单检查是否是有效的图片数据
+                            # 将二进制数据转换为Base64编码
+                            qr_img_base64 = base64.b64encode(content).decode('utf-8')
+                            return True, f"data:image/png;base64,{qr_img_base64}", session_id
+            
+            # 如果上述方法都失败，回退到直接使用URL
+            qrcode_url = f"{api_url}?type=qq&session={session_id}"
+            logger.debug(f"回退到使用二维码URL: {qrcode_url}")
             return True, qrcode_url, session_id
         except Exception as e:
             logger.error(f"获取QQ登录二维码时出错: {e}")
@@ -181,21 +216,39 @@ class QQBindPlugin(Star):
             return
         
         # 获取QQ登录二维码
-        success, qrcode_or_msg, session_id = await self.get_qrcode()
+        success, qrcode_data, session_id = await self.get_qrcode()
         
         if not success:
-            yield event.plain_result(f"获取QQ登录二维码失败: {qrcode_or_msg}")
+            yield event.plain_result(f"获取QQ登录二维码失败: {qrcode_data}")
             return
         
         # 保存会话信息
         self.login_sessions[user_id] = {
             "session_id": session_id,
             "timestamp": time.time(),
-            "qrcode_url": qrcode_or_msg
+            "qrcode_data": qrcode_data
         }
         
         # 发送二维码和绑定指引
-        yield event.image_result(qrcode_or_msg)
+        if qrcode_data.startswith(('http://', 'https://', 'data:')):
+            # 如果是URL或Base64编码的图片数据，直接发送
+            yield event.image_result(qrcode_data)
+        else:
+            # 如果是其他格式，尝试作为Base64编码处理
+            try:
+                # 检查是否已经是Base64编码
+                try:
+                    base64.b64decode(qrcode_data)
+                    # 如果解码成功，说明是有效的Base64编码
+                    yield event.image_result(f"data:image/png;base64,{qrcode_data}")
+                except:
+                    # 如果解码失败，可能不是Base64编码，尝试直接发送
+                    yield event.plain_result(f"无法显示二维码，请访问: {self.qrcode_api_url}?type=qq&session={session_id}")
+            except Exception as e:
+                logger.error(f"处理二维码数据时出错: {e}")
+                yield event.plain_result(f"处理二维码数据时出错，请重试")
+                return
+        
         yield event.plain_result(
             "请使用QQ扫描上方二维码登录\n"
             "登录成功后，您的QQ号将自动绑定到您的账号\n"
