@@ -46,6 +46,13 @@ class QQBindPlugin(Star):
         适配多种事件类型，包括QQ官方Webhook事件
         """
         try:
+            # 尝试使用get_sender_id方法
+            if hasattr(event, 'get_sender_id') and callable(event.get_sender_id):
+                sender_id = event.get_sender_id()
+                logger.debug(f"从get_sender_id方法获取: {sender_id}")
+                if sender_id:
+                    return sender_id
+            
             # 直接尝试获取user_openid属性
             if hasattr(event, 'user_openid'):
                 openid = event.user_openid
@@ -124,12 +131,16 @@ class QQBindPlugin(Star):
             qq_number = match.group(1)
             logger.debug(f"通过命令匹配提取到QQ号: {qq_number}")
         
-        # 优先尝试直接获取user_openid属性
-        if hasattr(event, 'user_openid'):
-            user_id = event.user_openid
-            logger.debug(f"直接从user_openid属性获取: {user_id}")
+        # 优先尝试使用get_sender_id方法
+        if hasattr(event, 'get_sender_id') and callable(event.get_sender_id):
+            user_id = event.get_sender_id()
+            if user_id:
+                logger.debug(f"从get_sender_id方法获取: {user_id}")
+            else:
+                # 如果get_sender_id返回空值，尝试其他方法
+                user_id = self.user_openid(event)
         else:
-            # 如果没有user_openid属性，使用辅助方法
+            # 如果没有get_sender_id方法，使用辅助方法
             user_id = self.user_openid(event)
         
         # 如果仍然无法获取用户ID，使用QQ号作为临时ID
