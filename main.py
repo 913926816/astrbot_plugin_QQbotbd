@@ -231,26 +231,12 @@ class QQBindPlugin(Star):
         
         # 发送二维码图片
         try:
-            # 如果qrcode_data是URL，尝试使用QQ官方API上传并发送
-            if qrcode_data.startswith(('http://', 'https://')):
-                # 检查是否有QQ API客户端
-                if hasattr(self.context, 'qq_api') and callable(getattr(self.context.qq_api, 'post', None)):
-                    # 上传图片到QQ服务器
-                    upload_success, file_info = await self.upload_image_to_qq(qrcode_data, user_id)
-                    
-                    if upload_success:
-                        # 使用file_info发送图片消息
-                        yield event.media_result(file_info)
-                    else:
-                        # 如果上传失败，回退到直接发送URL
-                        logger.warning(f"使用QQ官方API上传图片失败: {file_info}，回退到直接发送URL")
-                        yield event.image_result(qrcode_data)
-                else:
-                    # 如果没有QQ API客户端，直接发送URL
-                    logger.info("未找到QQ API客户端，直接发送图片URL")
-                    yield event.image_result(qrcode_data)
-            elif qrcode_data.startswith('data:image'):
+            # 根据qrcode_data的格式选择合适的发送方式
+            if qrcode_data.startswith('data:image'):
                 # 如果是Base64编码的图片数据，直接发送
+                yield event.image_result(qrcode_data)
+            elif qrcode_data.startswith(('http://', 'https://')):
+                # 如果是URL，直接发送
                 yield event.image_result(qrcode_data)
             else:
                 # 尝试作为Base64编码处理
@@ -260,11 +246,13 @@ class QQBindPlugin(Star):
                     # 如果解码成功，说明是有效的Base64编码
                     yield event.image_result(f"data:image/png;base64,{qrcode_data}")
                 except:
-                    # 如果解码失败，可能不是Base64编码，尝试直接发送
-                    yield event.plain_result(f"无法显示二维码，请访问: {self.qrcode_api_url}?type=qq&session={session_id}")
+                    # 如果解码失败，可能不是Base64编码，尝试作为URL发送
+                    logger.warning(f"无法解析二维码数据，尝试作为URL发送: {qrcode_data[:30]}...")
+                    yield event.image_result(qrcode_data)
         except Exception as e:
             logger.error(f"发送二维码图片时出错: {e}")
-            yield event.plain_result(f"发送二维码图片时出错，请重试")
+            # 如果发送图片失败，尝试发送二维码URL
+            yield event.plain_result(f"发送二维码图片失败，请访问以下链接获取二维码：\n{self.qrcode_api_url}?type=qq&session={session_id}")
             return
         
         yield event.plain_result(
