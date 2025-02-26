@@ -8,7 +8,6 @@ import time
 import datetime
 import aiohttp
 import asyncio
-import hashlib
 import random
 import string
 import base64
@@ -72,7 +71,11 @@ class QQBindPlugin(Star):
     def user_openid(self, event):
         """从事件中获取用户OpenID"""
         try:
-            # 首先尝试使用get_sender_id方法
+            # 尝试获取user_id属性(astrbot优先使用)
+            if hasattr(event, 'user_id') and event.user_id:
+                return event.user_id
+                
+            # 尝试使用get_sender_id方法
             if hasattr(event, 'get_sender_id') and callable(event.get_sender_id):
                 sender_id = event.get_sender_id()
                 if sender_id:
@@ -81,6 +84,10 @@ class QQBindPlugin(Star):
             # 直接尝试获取user_openid属性
             if hasattr(event, 'user_openid'):
                 return event.user_openid
+                
+            # 尝试获取open_id属性
+            if hasattr(event, 'open_id'):
+                return event.open_id
             
             # 尝试从日志字符串中提取OpenID
             event_str = str(event)
@@ -120,11 +127,16 @@ class QQBindPlugin(Star):
             session_id = self.generate_session_id()
             
             # 使用q.qq.com/qrcode/create接口获取qrcode
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                "Content-Type": "application/json"
+            }
+            
             async with aiohttp.ClientSession() as session:
                 create_url = "https://q.qq.com/qrcode/create"
                 data = {"type": "777"}
                 
-                async with session.post(create_url, json=data) as response:
+                async with session.post(create_url, json=data, headers=headers) as response:
                     if response.status != 200:
                         return False, f"创建二维码失败，状态码: {response.status}", None
                     
@@ -165,8 +177,14 @@ class QQBindPlugin(Star):
                             return True, f"data:image/png;base64,{img_str}", session_id
                             
                         except ImportError:
-                            # 如果没有qrcode库，返回登录URL
-                            return True, login_url, session_id
+                            # 如果没有qrcode库，尝试使用其他方式生成二维码
+                            try:
+                                # 使用API直接生成二维码
+                                qr_api_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={login_url}"
+                                return True, qr_api_url, session_id
+                            except:
+                                # 如果API也失败，返回纯文本登录URL
+                                return True, login_url, session_id
                             
                     except Exception as e:
                         return False, f"解析API响应失败: {e}", None
@@ -194,11 +212,16 @@ class QQBindPlugin(Star):
                 return False, "无效的qrcode", None
             
             # 使用q.qq.com/qrcode/get接口检查登录状态
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                "Content-Type": "application/json"
+            }
+            
             async with aiohttp.ClientSession() as session:
                 check_url = "https://q.qq.com/qrcode/get"
                 data = {"qrcode": qrcode}
                 
-                async with session.post(check_url, json=data) as response:
+                async with session.post(check_url, json=data, headers=headers) as response:
                     if response.status != 200:
                         return False, f"检查登录状态失败，状态码: {response.status}", None
                     
@@ -209,9 +232,7 @@ class QQBindPlugin(Star):
                         if status == "scanned":
                             return False, "已扫码，等待确认", None
                         elif status == "confirmed":
-                            qq_number = result.get("qq")
-                            if not qq_number:
-                                qq_number = result.get("qq_number")
+                            qq_number = result.get("qq") or result.get("qq_number")
                             if not qq_number:
                                 qq_number = f"unknown_{int(time.time())}"
                             return True, "登录成功", qq_number
@@ -254,10 +275,20 @@ class QQBindPlugin(Star):
         
         # 发送二维码图片
         try:
-            yield event.image_result(qrcode_data)
-        except Exception:
+            # 尝试使用不同的方法发送图片
+            if qrcode_data.startswith("data:image"):
+                # 如果是Base64编码的图片
+                yield event.image_result(qrcode_data)
+            elif qrcode_data.startswith(("http://", "https://")):
+                # 如果是URL
+                yield event.image_result(qrcode_data)
+            else:
+                # 其他情况
+                yield event.plain_result(f"请访问以下链接获取二维码：\n{qrcode_data}")
+                
+        except Exception as e:
             # 如果发送图片失败，尝试发送二维码URL
-            yield event.plain_result(f"发送二维码图片失败，请访问以下链接获取二维码：\n{qrcode_data}")
+            yield event.plain_result(f"请访问以下链接获取二维码：\n{qrcode_data}")
             return
         
         # 获取配置的超时时间
@@ -299,7 +330,11 @@ class QQBindPlugin(Star):
             # 检查是否超时
             current_time = time.time()
             if current_time - start_time > timeout_minutes * 60:
-                await event.reply(f"二维码已过期，请重新发送 /qqbind 获取新的二维码")
+                try:
+                    await event.reply(f"二维码已过期，请重新发送 /qqbind 获取新的二维码")
+                except:
+                    # 如果reply方法不可用，尝试使用其他方式回复
+                    pass
                 del self.login_sessions[user_id]
                 return
             
@@ -310,7 +345,10 @@ class QQBindPlugin(Star):
                 # 检查QQ号是否已被其他用户绑定
                 for openid, data in self.bind_data.items():
                     if openid != user_id and data.get("qq_number") == qq_number:
-                        await event.reply(f"该QQ号已被其他用户绑定，请使用其他QQ号")
+                        try:
+                            await event.reply(f"该QQ号已被其他用户绑定，请使用其他QQ号")
+                        except:
+                            pass
                         del self.login_sessions[user_id]
                         return
                 
@@ -318,14 +356,17 @@ class QQBindPlugin(Star):
                 self.bind_data[user_id] = {
                     "qq_number": qq_number,
                     "bind_time": int(time.time()),
-                    "verified": True  # 简化为默认验证
+                    "verified": True
                 }
                 self._save_data()
                 
                 # 清理会话
                 del self.login_sessions[user_id]
                 
-                await event.reply(f"QQ登录成功！\n您的QQ号 {qq_number} 已成功绑定")
+                try:
+                    await event.reply(f"QQ登录成功！\n您的QQ号 {qq_number} 已成功绑定")
+                except:
+                    pass
                 return
             
             # 等待3秒后再次检查
@@ -333,7 +374,10 @@ class QQBindPlugin(Star):
         
         # 如果达到最大检查次数仍未成功，则超时
         if user_id in self.login_sessions:
-            await event.reply(f"登录超时，请重新发送 /qqbind 获取新的二维码")
+            try:
+                await event.reply(f"登录超时，请重新发送 /qqbind 获取新的二维码")
+            except:
+                pass
             del self.login_sessions[user_id]
     
     @filter.regex(r'.*')
