@@ -1,7 +1,6 @@
 from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
-from astrbot.api.config import ConfigItem, ConfigType
 import re
 import json
 import os
@@ -14,36 +13,15 @@ import random
 import string
 import base64
 
+# 定义默认配置
+DEFAULT_CONFIG = {
+    "qq_access_token": "",  # QQ API访问令牌
+    "auto_verify": True,    # 是否自动验证扫码登录的QQ号
+    "qrcode_timeout": 5     # 二维码有效期(分钟)
+}
+
 @register("qqbind", "QQ绑定插件", "一个通过二维码登录绑定QQ号的插件", "1.0.0", "https://github.com/yourusername/astrbot_plugin_QQbotbd")
 class QQBindPlugin(Star):
-    # 定义插件配置项
-    config_items = [
-        ConfigItem(
-            key="qq_access_token",
-            name="QQ API访问令牌",
-            description="用于调用QQ开放平台API的访问令牌(access_token)",
-            type=ConfigType.STRING,
-            default="",
-            required=False
-        ),
-        ConfigItem(
-            key="auto_verify",
-            name="自动验证",
-            description="是否自动将扫码登录的QQ号标记为已验证",
-            type=ConfigType.BOOLEAN,
-            default=True,
-            required=False
-        ),
-        ConfigItem(
-            key="qrcode_timeout",
-            name="二维码超时时间",
-            description="二维码有效期(分钟)",
-            type=ConfigType.INTEGER,
-            default=5,
-            required=False
-        )
-    ]
-    
     def __init__(self, context: Context):
         """初始化QQ绑定插件
         
@@ -52,16 +30,13 @@ class QQBindPlugin(Star):
         """
         super().__init__(context)
         self.data_file = os.path.join(os.path.dirname(__file__), "qqbind_data.json")
+        self.config_file = os.path.join(os.path.dirname(__file__), "config.json")
         self.bind_data = self._load_data()
+        self.config = self._load_config()
         self.login_sessions = {}  # 存储登录会话信息
         self.api_base_url = "https://api.yuafeng.cn/API/ly"
         self.qrcode_api_url = f"{self.api_base_url}/qrcode.php"  # 二维码获取接口
         self.check_login_api_url = f"{self.api_base_url}/check_login.php"  # 检查登录状态接口
-        
-        # 从配置中获取设置
-        self.access_token = self.get_config("qq_access_token", "")
-        self.auto_verify = self.get_config("auto_verify", True)
-        self.qrcode_timeout = self.get_config("qrcode_timeout", 5)
         
         logger.info(f"QQ绑定插件已加载，数据条目数: {len(self.bind_data)}")
     
@@ -84,6 +59,61 @@ class QQBindPlugin(Star):
             logger.debug("QQ绑定数据保存成功")
         except Exception as e:
             logger.error(f"保存QQ绑定数据失败: {e}")
+    
+    def _load_config(self):
+        """加载配置，如果文件不存在则创建默认配置"""
+        if os.path.exists(self.config_file):
+            try:
+                with open(self.config_file, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+                    # 确保所有默认配置项都存在
+                    for key, value in DEFAULT_CONFIG.items():
+                        if key not in config:
+                            config[key] = value
+                    return config
+            except Exception as e:
+                logger.error(f"加载配置失败: {e}")
+                return DEFAULT_CONFIG.copy()
+        else:
+            # 创建默认配置文件
+            try:
+                with open(self.config_file, "w", encoding="utf-8") as f:
+                    json.dump(DEFAULT_CONFIG, f, ensure_ascii=False, indent=2)
+                logger.info("已创建默认配置文件")
+            except Exception as e:
+                logger.error(f"创建默认配置文件失败: {e}")
+            return DEFAULT_CONFIG.copy()
+    
+    def _save_config(self):
+        """保存配置到文件"""
+        try:
+            with open(self.config_file, "w", encoding="utf-8") as f:
+                json.dump(self.config, f, ensure_ascii=False, indent=2)
+            logger.debug("配置保存成功")
+        except Exception as e:
+            logger.error(f"保存配置失败: {e}")
+    
+    def get_config(self, key, default=None):
+        """获取配置项的值
+        
+        Args:
+            key (str): 配置项的键
+            default: 默认值，如果配置项不存在则返回此值
+            
+        Returns:
+            配置项的值
+        """
+        return self.config.get(key, default)
+    
+    def set_config(self, key, value):
+        """设置配置项的值
+        
+        Args:
+            key (str): 配置项的键
+            value: 配置项的值
+        """
+        self.config[key] = value
+        self._save_config()
     
     def user_openid(self, event):
         """从事件中获取用户OpenID"""
@@ -686,3 +716,57 @@ class QQBindPlugin(Star):
         except Exception as e:
             logger.error(f"发送图片消息时出错: {e}")
             return False, f"发送图片消息过程出错: {str(e)}"
+
+    @filter.command("qqconfig")
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    async def qq_config(self, event: AstrMessageEvent):
+        '''设置或查看QQ绑定插件配置 - 仅管理员可用 - 使用方法: /qqconfig [key] [value]'''
+        message_str = event.message_str.strip()
+        
+        # 检查是否提供了参数
+        match = re.search(r'/qqconfig\s+([a-zA-Z_]+)(?:\s+(.+))?', message_str)
+        
+        if not match:
+            # 如果没有提供参数，显示所有配置
+            config_text = "当前配置：\n"
+            for key, value in self.config.items():
+                config_text += f"{key}: {value}\n"
+            
+            config_text += "\n可用配置项：\n"
+            config_text += "qq_access_token: QQ API访问令牌\n"
+            config_text += "auto_verify: 是否自动验证扫码登录的QQ号 (true/false)\n"
+            config_text += "qrcode_timeout: 二维码有效期(分钟)\n"
+            
+            config_text += "\n使用方法：\n"
+            config_text += "/qqconfig [key] [value] - 设置配置项\n"
+            config_text += "/qqconfig [key] - 查看配置项\n"
+            
+            yield event.plain_result(config_text)
+            return
+        
+        key = match.group(1)
+        value = match.group(2) if match.group(2) else None
+        
+        if key not in DEFAULT_CONFIG:
+            yield event.plain_result(f"未知配置项: {key}\n可用配置项: {', '.join(DEFAULT_CONFIG.keys())}")
+            return
+        
+        if value is None:
+            # 如果没有提供值，显示当前配置
+            current_value = self.get_config(key)
+            yield event.plain_result(f"配置项 {key} 的当前值为: {current_value}")
+            return
+        
+        # 根据配置项类型转换值
+        if key == "auto_verify":
+            value = value.lower() in ("true", "yes", "1", "on")
+        elif key == "qrcode_timeout":
+            try:
+                value = int(value)
+            except ValueError:
+                yield event.plain_result(f"无效的值: {value}，应为整数")
+                return
+        
+        # 设置配置项
+        self.set_config(key, value)
+        yield event.plain_result(f"已设置配置项 {key} 的值为: {value}")
