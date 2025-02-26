@@ -1,6 +1,6 @@
-name: astrbot_plugin_QQbotbd # 这是你的插件的唯一识别名。
-desc: 这是 AstrBot 的默认插件，支持关键词回复。 # 插件简短描述
-help: 输入 /help 查看关键词回复帮助。 # 插件的帮助信息
-version: v1.0 # 插件版本号。格式：v1.1.1 或者 v1.1
-author: 913926816 # 作者
-repo: https://github.com/913926816/astrbot_plugin_QQbotbd # 插件的仓库地址
+name: astrbot_plugin_QQbotbd
+display_name: QQ绑定插件
+version: 1.0.0
+description: 一个通过二维码登录绑定QQ号的插件
+author: 913926816
+repository: https://github.com/913926816/astrbot_plugin_QQbotbd
