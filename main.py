@@ -6,8 +6,13 @@ import json
 import os
 import time
 import datetime
+import aiohttp
+import asyncio
+import hashlib
+import random
+import string
 
-@register("qqbind", "QQ绑定插件", "一个用于绑定用户OpenID与QQ号的插件", "1.0.0", "https://github.com/yourusername/astrbot_plugin_QQbotbd")
+@register("qqbind", "QQ绑定插件", "一个通过登录验证绑定QQ号的插件", "1.0.0", "https://github.com/yourusername/astrbot_plugin_QQbotbd")
 class QQBindPlugin(Star):
     def __init__(self, context: Context):
         """初始化QQ绑定插件
@@ -18,6 +23,8 @@ class QQBindPlugin(Star):
         super().__init__(context)
         self.data_file = os.path.join(os.path.dirname(__file__), "qqbind_data.json")
         self.bind_data = self._load_data()
+        self.login_sessions = {}  # 存储登录会话信息
+        self.api_url = "https://api.yuafeng.cn/API/ly/music_login.php"
         logger.info(f"QQ绑定插件已加载，数据条目数: {len(self.bind_data)}")
     
     def _load_data(self):
@@ -41,10 +48,7 @@ class QQBindPlugin(Star):
             logger.error(f"保存QQ绑定数据失败: {e}")
     
     def user_openid(self, event):
-        """从事件中获取用户OpenID
-        
-        适配多种事件类型，包括QQ官方Webhook事件
-        """
+        """从事件中获取用户OpenID"""
         try:
             # 尝试使用get_sender_id方法
             if hasattr(event, 'get_sender_id') and callable(event.get_sender_id):
@@ -72,22 +76,6 @@ class QQBindPlugin(Star):
                 logger.debug(f"从事件字符串中提取OpenID: {openid}")
                 return openid
             
-            # 针对QQOfficialWebhookMessageEvent的特殊处理
-            if event_type == "QQOfficialWebhookMessageEvent":
-                # 尝试获取event_id属性
-                if hasattr(event, 'event_id') and event.event_id:
-                    logger.debug(f"从event_id属性获取: {event.event_id}")
-                    return event.event_id
-            
-            # 临时解决方案：从消息内容中提取QQ号作为ID
-            if hasattr(event, 'message_str'):
-                message = event.message_str
-                qq_match = re.search(r'(?:/qqbind|qqbind)\s*(\d{5,11})', message)
-                if qq_match:
-                    qq_number = qq_match.group(1)
-                    logger.debug(f"从消息内容中提取QQ号作为ID: {qq_number}")
-                    return f"qq_{qq_number}"  # 添加前缀避免冲突
-            
             # 记录无法获取OpenID的情况
             logger.error(f"无法从事件中获取用户OpenID: {event_type}")
             return None
@@ -108,73 +96,152 @@ class QQBindPlugin(Star):
             return self.bind_data[openid]["qq_number"]
         return None
     
+    def generate_session_id(self):
+        """生成随机会话ID"""
+        return ''.join(random.choices(string.ascii_letters + string.digits, k=16))
+    
+    async def verify_qq_login(self, qq, password):
+        """验证QQ登录
+        
+        Args:
+            qq (str): QQ号
+            password (str): 密码
+            
+        Returns:
+            tuple: (成功与否, 消息, QQ号)
+        """
+        try:
+            async with aiohttp.ClientSession() as session:
+                params = {
+                    "type": "qq",  # 根据API文档，需要提供type参数
+                    "uin": qq,
+                    "pwd": password
+                }
+                
+                async with session.get(self.api_url, params=params) as response:
+                    if response.status != 200:
+                        return False, f"API请求失败，状态码: {response.status}", None
+                    
+                    data = await response.json()
+                    logger.debug(f"QQ登录API返回: {data}")
+                    
+                    if data.get("code") == 1:  # 假设1是成功状态码
+                        return True, "登录成功", qq
+                    else:
+                        return False, data.get("msg", "登录失败，未知原因"), None
+        except Exception as e:
+            logger.error(f"验证QQ登录时出错: {e}")
+            return False, f"验证过程出错: {str(e)}", None
+    
     @filter.command("qqbind")
     async def qq_bind(self, event: AstrMessageEvent):
-        '''绑定QQ号 - 使用方法: /qqbind [QQ号]'''
-        message_str = event.message_str.strip()
-        
-        # 打印原始消息和事件信息，帮助调试
-        logger.debug(f"收到绑定命令，原始消息: '{message_str}'")
-        
-        # 更灵活的正则表达式，尝试多种可能的格式
-        match = re.search(r'(?:/qqbind|qqbind)\s*(\d{5,11})', message_str)
-        if not match:
-            # 尝试直接提取数字
-            digits_match = re.search(r'(\d{5,11})', message_str)
-            if digits_match:
-                qq_number = digits_match.group(1)
-                logger.debug(f"通过数字匹配提取到QQ号: {qq_number}")
-            else:
-                yield event.plain_result("请提供正确的QQ号，格式：/qqbind [QQ号]")
-                return
-        else:
-            qq_number = match.group(1)
-            logger.debug(f"通过命令匹配提取到QQ号: {qq_number}")
-        
-        # 优先尝试使用get_sender_id方法
-        if hasattr(event, 'get_sender_id') and callable(event.get_sender_id):
-            user_id = event.get_sender_id()
-            if user_id:
-                logger.debug(f"从get_sender_id方法获取: {user_id}")
-            else:
-                # 如果get_sender_id返回空值，尝试其他方法
-                user_id = self.user_openid(event)
-        else:
-            # 如果没有get_sender_id方法，使用辅助方法
-            user_id = self.user_openid(event)
-        
-        # 如果仍然无法获取用户ID，使用QQ号作为临时ID
+        '''开始QQ绑定流程 - 使用方法: /qqbind'''
+        user_id = self.user_openid(event)
         if not user_id:
-            user_id = f"qq_{qq_number}"
-            logger.warning(f"无法获取用户ID，使用QQ号作为临时ID: {user_id}")
+            yield event.plain_result("无法获取您的用户ID，绑定失败")
+            return
         
-        # 检查QQ号是否已被其他用户绑定
-        for openid, data in self.bind_data.items():
-            if openid != user_id and data.get("qq_number") == qq_number:
-                yield event.plain_result(f"该QQ号已被其他用户绑定，请使用其他QQ号")
-                return
-        
-        # 绑定QQ号到用户的OpenID或临时ID
-        self.bind_data[user_id] = {
-            "qq_number": qq_number,
-            "bind_time": int(time.time())
+        # 生成会话ID
+        session_id = self.generate_session_id()
+        self.login_sessions[user_id] = {
+            "session_id": session_id,
+            "step": "waiting_qq",
+            "timestamp": time.time()
         }
-        self._save_data()
         
-        logger.info(f"用户 {user_id} 绑定QQ号 {qq_number} 成功")
+        # 发送绑定指引
+        yield event.plain_result(
+            "请按照以下步骤进行QQ绑定：\n"
+            "1. 请发送您的QQ号\n"
+            "2. 然后我们会要求您提供验证信息\n"
+            "3. 验证成功后，您的QQ号将被绑定到您的账号\n\n"
+            "您可以随时发送 'cancel' 取消绑定流程"
+        )
+    
+    @filter.message()
+    async def handle_bind_flow(self, event: AstrMessageEvent):
+        '''处理绑定流程中的消息'''
+        user_id = self.user_openid(event)
+        if not user_id or user_id not in self.login_sessions:
+            return  # 不是绑定流程中的消息
         
-        # 确保显示正确的OpenID
-        yield event.plain_result(f"您的QQID为：{user_id}\n您绑定的QQ为：{qq_number}")
+        message = event.message_str.strip()
+        
+        # 检查是否取消
+        if message.lower() == 'cancel':
+            del self.login_sessions[user_id]
+            yield event.plain_result("已取消绑定流程")
+            return
+        
+        session = self.login_sessions[user_id]
+        
+        # 检查会话是否过期（30分钟）
+        if time.time() - session["timestamp"] > 1800:
+            del self.login_sessions[user_id]
+            yield event.plain_result("绑定会话已过期，请重新开始绑定流程")
+            return
+        
+        # 根据当前步骤处理消息
+        if session["step"] == "waiting_qq":
+            # 验证QQ号格式
+            if not re.match(r'^\d{5,11}$', message):
+                yield event.plain_result("请输入有效的QQ号（5-11位数字）")
+                return
+            
+            # 保存QQ号并进入下一步
+            session["qq"] = message
+            session["step"] = "waiting_password"
+            session["timestamp"] = time.time()
+            
+            yield event.plain_result(
+                f"已记录QQ号: {message}\n"
+                "请输入您的QQ密码进行验证\n"
+                "注意：我们不会存储您的密码，仅用于验证您是QQ号的所有者"
+            )
+            
+        elif session["step"] == "waiting_password":
+            # 保存密码并进行验证
+            password = message
+            qq = session["qq"]
+            
+            # 发送验证中消息
+            yield event.plain_result("正在验证QQ登录信息，请稍候...")
+            
+            # 验证QQ登录
+            success, msg, verified_qq = await self.verify_qq_login(qq, password)
+            
+            # 清除会话中的敏感信息
+            if "password" in session:
+                del session["password"]
+            
+            if success:
+                # 绑定QQ号
+                self.bind_data[user_id] = {
+                    "qq_number": verified_qq,
+                    "bind_time": int(time.time()),
+                    "verified": True
+                }
+                self._save_data()
+                
+                # 清除会话
+                del self.login_sessions[user_id]
+                
+                logger.info(f"用户 {user_id} 通过登录验证绑定QQ号 {verified_qq} 成功")
+                yield event.plain_result(f"验证成功！\n您的QQID为：{user_id}\n您绑定的QQ为：{verified_qq}")
+            else:
+                # 验证失败，返回错误信息
+                yield event.plain_result(f"验证失败: {msg}\n请重新尝试或发送 'cancel' 取消绑定")
+                # 重置到等待QQ号步骤
+                session["step"] = "waiting_qq"
+                session["timestamp"] = time.time()
     
     @filter.command("qqunbind")
     async def qq_unbind(self, event: AstrMessageEvent):
         '''解绑QQ号 - 使用方法: /qqunbind'''
         user_id = self.user_openid(event)
         
-        # 如果无法获取用户ID，尝试从已绑定的QQ号中查找
         if not user_id:
-            # 提示用户使用QQ号解绑
-            yield event.plain_result("无法获取您的用户ID，请使用 /qqunbind [QQ号] 进行解绑")
+            yield event.plain_result("无法获取您的用户ID，解绑失败")
             return
         
         if user_id not in self.bind_data:
@@ -188,86 +255,27 @@ class QQBindPlugin(Star):
         logger.info(f"用户 {user_id} 解绑QQ号 {qq_number} 成功")
         yield event.plain_result(f"成功解绑QQ号: {qq_number}")
     
-    @filter.command("qqunbindqq")
-    async def qq_unbind_by_qq(self, event: AstrMessageEvent):
-        '''通过QQ号解绑 - 使用方法: /qqunbindqq [QQ号]'''
-        message_str = event.message_str.strip()
-        logger.debug(f"收到QQ解绑命令，原始消息: '{message_str}'")
-        
-        # 更灵活的正则表达式
-        match = re.search(r'(?:/qqunbindqq|qqunbindqq)\s*(\d{5,11})', message_str)
-        if not match:
-            # 尝试直接提取数字
-            digits_match = re.search(r'(\d{5,11})', message_str)
-            if digits_match:
-                qq_number = digits_match.group(1)
-            else:
-                yield event.plain_result("请提供正确的QQ号，格式：/qqunbindqq [QQ号]")
-                return
-        else:
-            qq_number = match.group(1)
-        
-        found = False
-        
-        # 查找绑定了该QQ号的用户ID
-        for openid, data in list(self.bind_data.items()):
-            if data.get("qq_number") == qq_number:
-                del self.bind_data[openid]
-                found = True
-                logger.info(f"通过QQ号解绑成功: {qq_number}, 用户ID: {openid}")
-        
-        self._save_data()
-        
-        if found:
-            yield event.plain_result(f"成功解绑QQ号: {qq_number}")
-        else:
-            yield event.plain_result(f"未找到绑定QQ号 {qq_number} 的记录")
-    
     @filter.command("qqinfo")
     async def qq_info(self, event: AstrMessageEvent):
-        '''查询已绑定的QQ号 - 使用方法: /qqinfo [可选:QQ号]'''
-        message_str = event.message_str.strip()
-        logger.debug(f"收到查询命令，原始消息: '{message_str}'")
-        
-        # 更灵活的正则表达式
-        match = re.search(r'(?:/qqinfo|qqinfo)\s*(\d{5,11})', message_str)
-        
-        if match:
-            # 通过QQ号查询
-            qq_number = match.group(1)
-            found = False
-            
-            for openid, data in self.bind_data.items():
-                if data.get("qq_number") == qq_number:
-                    bind_time = data.get("bind_time", 0)
-                    bind_time_str = datetime.datetime.fromtimestamp(bind_time).strftime("%Y-%m-%d %H:%M:%S") if bind_time else "未知时间"
-                    yield event.plain_result(f"QQ号 {qq_number} 已绑定\nQQID为：{openid}\n绑定时间：{bind_time_str}")
-                    found = True
-                    break
-            
-            if not found:
-                yield event.plain_result(f"未找到QQ号 {qq_number} 的绑定记录")
-            return
-        
-        # 尝试通过用户ID查询
+        '''查询已绑定的QQ号 - 使用方法: /qqinfo'''
         user_id = self.user_openid(event)
         if not user_id:
-            yield event.plain_result("无法获取您的用户ID，请使用 /qqinfo [QQ号] 查询特定QQ号的绑定信息")
+            yield event.plain_result("无法获取您的用户ID，查询失败")
             return
-            
-        user_name = event.get_sender_name() if hasattr(event, 'get_sender_name') and callable(event.get_sender_name) else "用户"
         
         if user_id not in self.bind_data:
-            yield event.plain_result("您尚未绑定QQ号，请使用 /qqbind [QQ号] 进行绑定")
+            yield event.plain_result("您尚未绑定QQ号，请使用 /qqbind 进行绑定")
             return
         
         qq_data = self.bind_data[user_id]
         qq_number = qq_data["qq_number"]
         bind_time = qq_data.get("bind_time", 0)
+        verified = qq_data.get("verified", False)
         
         bind_time_str = datetime.datetime.fromtimestamp(bind_time).strftime("%Y-%m-%d %H:%M:%S") if bind_time else "未知时间"
+        verified_str = "已验证" if verified else "未验证"
         
-        yield event.plain_result(f"您的QQID为：{user_id}\n您绑定的QQ为：{qq_number}\n绑定时间：{bind_time_str}")
+        yield event.plain_result(f"您的QQID为：{user_id}\n您绑定的QQ为：{qq_number}\n绑定时间：{bind_time_str}\n验证状态：{verified_str}")
     
     @filter.command("qqlist", priority=1)
     @filter.permission_type(filter.PermissionType.ADMIN)
@@ -283,6 +291,8 @@ class QQBindPlugin(Star):
             if 'bind_time' in data:
                 bind_time_str = datetime.datetime.fromtimestamp(data['bind_time']).strftime("%Y-%m-%d %H:%M:%S")
                 result += f"绑定时间: {bind_time_str}\n"
+            verified = data.get("verified", False)
+            result += f"验证状态: {'已验证' if verified else '未验证'}\n"
             result += "----------\n"
         
         # 如果文本过长，转为图片发送
@@ -300,19 +310,19 @@ class QQBindPlugin(Star):
     async def qq_help(self, event: AstrMessageEvent):
         '''QQ绑定插件帮助 - 使用方法: /qqhelp'''
         help_text = """QQ绑定插件使用帮助：
-1. 绑定QQ号：/qqbind [QQ号]
+1. 开始绑定流程：/qqbind
 2. 解绑QQ号：/qqunbind
-3. 通过QQ号解绑：/qqunbindqq [QQ号]
-4. 查询绑定信息：/qqinfo [可选:QQ号]
-5. 查看帮助：/qqhelp
+3. 查询绑定信息：/qqinfo
+4. 查看帮助：/qqhelp
 
 管理员命令：
 1. 查询所有绑定记录：/qqlist
-2. 查询指定ID的QQ号：/whoisqq [ID]"""
+2. 查询指定ID的QQ号：/whoisqq [ID]
+
+注意：绑定QQ号需要进行登录验证，以确保您是QQ号的所有者。"""
         
         yield event.plain_result(help_text)
     
-    # 添加一个用于被其他插件调用的API，通过OpenID查询QQ号
     @filter.command("whoisqq")
     @filter.permission_type(filter.PermissionType.ADMIN)
     async def who_is_qq(self, event: AstrMessageEvent):
@@ -331,5 +341,8 @@ class QQBindPlugin(Star):
             yield event.plain_result(f"未找到ID {target_id} 绑定的QQ号")
             return
         
-        qq_number = self.bind_data[target_id]["qq_number"]
-        yield event.plain_result(f"ID {target_id} 绑定的QQ号为: {qq_number}")
+        qq_data = self.bind_data[target_id]
+        qq_number = qq_data["qq_number"]
+        verified = qq_data.get("verified", False)
+        
+        yield event.plain_result(f"ID {target_id} 绑定的QQ号为: {qq_number}\n验证状态: {'已验证' if verified else '未验证'}")
