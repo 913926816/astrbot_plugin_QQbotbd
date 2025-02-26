@@ -109,24 +109,15 @@ class QQBindPlugin(Star):
             tuple: (成功与否, 二维码URL或错误消息, 会话标识)
         """
         try:
-            async with aiohttp.ClientSession() as session:
-                params = {
-                    "type": "qq",  # 指定为QQ登录
-                }
-                
-                async with session.get(self.qrcode_api_url, params=params) as response:
-                    if response.status != 200:
-                        return False, f"API请求失败，状态码: {response.status}", None
-                    
-                    data = await response.json()
-                    logger.debug(f"获取二维码API返回: {data}")
-                    
-                    if data.get("code") == 1:  # 假设1是成功状态码
-                        qrcode_url = data.get("qrcode_url")
-                        session_id = data.get("session_id")
-                        return True, qrcode_url, session_id
-                    else:
-                        return False, data.get("msg", "获取二维码失败，未知原因"), None
+            # 生成一个唯一的会话ID
+            session_id = self.generate_session_id()
+            
+            # 构建二维码URL
+            qrcode_url = f"{self.api_base_url}/qrcode.php?type=qq&session={session_id}"
+            
+            # 直接返回二维码URL和会话ID
+            logger.debug(f"生成二维码URL: {qrcode_url}")
+            return True, qrcode_url, session_id
         except Exception as e:
             logger.error(f"获取QQ登录二维码时出错: {e}")
             return False, f"获取二维码过程出错: {str(e)}", None
@@ -143,23 +134,34 @@ class QQBindPlugin(Star):
         try:
             async with aiohttp.ClientSession() as session:
                 params = {
-                    "session_id": session_id,
+                    "session": session_id,
+                    "type": "qq"
                 }
                 
-                async with session.get(self.check_login_api_url, params=params) as response:
+                check_url = f"{self.api_base_url}/check_login.php"
+                async with session.get(check_url, params=params) as response:
                     if response.status != 200:
                         return False, f"API请求失败，状态码: {response.status}", None
                     
-                    data = await response.json()
-                    logger.debug(f"检查登录状态API返回: {data}")
+                    # 尝试以文本方式读取响应
+                    text = await response.text()
+                    logger.debug(f"检查登录状态API返回: {text}")
                     
-                    if data.get("code") == 1:  # 登录成功
-                        qq_number = data.get("qq_number")
+                    # 检查是否包含成功登录的标识
+                    if "登录成功" in text or "success" in text.lower():
+                        # 尝试从响应中提取QQ号
+                        qq_match = re.search(r'QQ号[：:]\s*(\d{5,11})', text)
+                        if qq_match:
+                            qq_number = qq_match.group(1)
+                        else:
+                            # 如果无法提取，使用一个随机QQ号作为占位符
+                            qq_number = f"unknown_{int(time.time())}"
+                        
                         return True, "登录成功", qq_number
-                    elif data.get("code") == 0:  # 未登录
+                    elif "等待扫码" in text or "waiting" in text.lower():
                         return False, "等待扫码登录", None
                     else:
-                        return False, data.get("msg", "检查登录状态失败，未知原因"), None
+                        return False, "检查登录状态失败，未知响应", None
         except Exception as e:
             logger.error(f"检查QQ登录状态时出错: {e}")
             return False, f"检查登录状态过程出错: {str(e)}", None
