@@ -1,27 +1,6 @@
 {
-  "title": "QQ绑定插件配置",
-  "description": "配置QQ绑定插件的各项参数",
-  "type": "object",
-  "properties": {
-    "qq_access_token": {
-      "title": "QQ API访问令牌",
-      "description": "用于调用QQ开放平台API的访问令牌(access_token)",
-      "type": "string",
-      "default": "abc123def456"
-    },
-    "auto_verify": {
-      "title": "自动验证",
-      "description": "是否自动将扫码登录的QQ号标记为已验证",
-      "type": "boolean",
-      "default": true
-    },
-    "qrcode_timeout": {
-      "title": "二维码超时时间",
-      "description": "二维码有效期(分钟)",
-      "type": "integer",
-      "minimum": 1,
-      "maximum": 30,
-      "default": 5
-    }
+  "qq_access_token": {
+    "type": "string",
+    "default": "abc123def456"
   }
 } 
