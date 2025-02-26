@@ -28,6 +28,12 @@ class QQBindPlugin(Star):
         self.api_base_url = "https://api.yuafeng.cn/API/ly"
         self.qrcode_api_url = f"{self.api_base_url}/qrcode.php"  # 二维码获取接口
         self.check_login_api_url = f"{self.api_base_url}/check_login.php"  # 检查登录状态接口
+        
+        # 尝试从配置中获取QQ access_token
+        self.access_token = None
+        if hasattr(context, 'config') and 'qq_access_token' in context.config:
+            self.access_token = context.config['qq_access_token']
+        
         logger.info(f"QQ绑定插件已加载，数据条目数: {len(self.bind_data)}")
     
     def _load_data(self):
@@ -231,24 +237,52 @@ class QQBindPlugin(Star):
         
         # 发送二维码图片
         try:
-            # 根据qrcode_data的格式选择合适的发送方式
-            if qrcode_data.startswith('data:image'):
-                # 如果是Base64编码的图片数据，直接发送
-                yield event.image_result(qrcode_data)
-            elif qrcode_data.startswith(('http://', 'https://')):
-                # 如果是URL，直接发送
-                yield event.image_result(qrcode_data)
-            else:
-                # 尝试作为Base64编码处理
-                try:
-                    # 检查是否已经是Base64编码
-                    base64.b64decode(qrcode_data)
-                    # 如果解码成功，说明是有效的Base64编码
-                    yield event.image_result(f"data:image/png;base64,{qrcode_data}")
-                except:
-                    # 如果解码失败，可能不是Base64编码，尝试作为URL发送
-                    logger.warning(f"无法解析二维码数据，尝试作为URL发送: {qrcode_data[:30]}...")
+            # 尝试使用QQ开放平台API发送图片
+            if hasattr(self, 'access_token') and self.access_token:
+                # 如果qrcode_data是URL，尝试上传并发送
+                if qrcode_data.startswith(('http://', 'https://')):
+                    # 上传图片获取media_id
+                    upload_success, media_id = await self.upload_image_to_qq(qrcode_data)
+                    
+                    if upload_success:
+                        # 使用media_id发送图片消息
+                        send_success, response = await self.send_image_message(user_id, media_id)
+                        
+                        if send_success:
+                            logger.info(f"使用QQ开放平台API成功发送二维码图片")
+                        else:
+                            # 如果发送失败，回退到使用AstrBot的方法
+                            logger.warning(f"使用QQ开放平台API发送图片失败: {response}，回退到使用AstrBot方法")
+                            yield event.image_result(qrcode_data)
+                    else:
+                        # 如果上传失败，回退到使用AstrBot的方法
+                        logger.warning(f"上传图片到QQ服务器失败: {media_id}，回退到使用AstrBot方法")
+                        yield event.image_result(qrcode_data)
+                else:
+                    # 如果不是URL，直接使用AstrBot的方法
                     yield event.image_result(qrcode_data)
+            else:
+                # 如果没有配置access_token，使用AstrBot的方法
+                logger.info("未配置QQ access_token，使用AstrBot方法发送图片")
+                
+                # 根据qrcode_data的格式选择合适的发送方式
+                if qrcode_data.startswith('data:image'):
+                    # 如果是Base64编码的图片数据，直接发送
+                    yield event.image_result(qrcode_data)
+                elif qrcode_data.startswith(('http://', 'https://')):
+                    # 如果是URL，直接发送
+                    yield event.image_result(qrcode_data)
+                else:
+                    # 尝试作为Base64编码处理
+                    try:
+                        # 检查是否已经是Base64编码
+                        base64.b64decode(qrcode_data)
+                        # 如果解码成功，说明是有效的Base64编码
+                        yield event.image_result(f"data:image/png;base64,{qrcode_data}")
+                    except:
+                        # 如果解码失败，可能不是Base64编码，尝试作为URL发送
+                        logger.warning(f"无法解析二维码数据，尝试作为URL发送: {qrcode_data[:30]}...")
+                        yield event.image_result(qrcode_data)
         except Exception as e:
             logger.error(f"发送二维码图片时出错: {e}")
             # 如果发送图片失败，尝试发送二维码URL
@@ -487,41 +521,124 @@ class QQBindPlugin(Star):
         
         yield event.plain_result(f"ID {target_id} 绑定的QQ号为: {qq_number}\n验证状态: {'已验证' if verified else '未验证'}")
 
-    async def upload_image_to_qq(self, image_url, user_id):
-        """将图片上传到QQ服务器
+    async def upload_image_to_qq(self, image_path_or_url):
+        """将图片上传到QQ服务器获取media_id
         
         Args:
-            image_url (str): 图片URL
-            user_id (str): 用户的OpenID
+            image_path_or_url (str): 图片路径或URL
             
         Returns:
-            tuple: (成功与否, file_info或错误消息)
+            tuple: (成功与否, media_id或错误消息)
         """
         try:
-            # 构建API请求URL
-            api_url = f"/v2/users/{user_id}/files"
-            
-            # 准备请求参数
-            data = {
-                "file_type": 1,  # 1表示图片
-                "url": image_url,
-                "srv_send_msg": False  # 不直接发送，只获取file_info
-            }
-            
-            # 发送请求
-            # 检查是否有QQ API客户端
-            if hasattr(self.context, 'qq_api') and callable(getattr(self.context.qq_api, 'post', None)):
-                response = await self.context.qq_api.post(api_url, json=data)
-                
-                if isinstance(response, dict) and "file_info" in response:
-                    return True, response["file_info"]
+            # 检查是否有access_token
+            if not hasattr(self, 'access_token') or not self.access_token:
+                # 尝试从配置中获取access_token
+                if hasattr(self.context, 'config') and 'qq_access_token' in self.context.config:
+                    self.access_token = self.context.config['qq_access_token']
                 else:
-                    logger.error(f"上传图片到QQ服务器失败，响应: {response}")
-                    return False, f"上传图片失败: {response}"
-            else:
-                # 如果没有直接调用QQ API的方法，记录警告并返回失败
-                logger.warning("未找到QQ API调用方法，无法上传图片到QQ服务器")
-                return False, "未找到QQ API调用方法，无法上传图片"
+                    return False, "未配置QQ access_token，无法上传图片"
+            
+            # 构建API请求URL
+            api_url = "https://api.q.qq.com/api/media/upload"
+            
+            async with aiohttp.ClientSession() as session:
+                headers = {"Authorization": f"Bearer {self.access_token}"}
+                
+                # 根据输入类型选择上传方式
+                if image_path_or_url.startswith(('http://', 'https://')):
+                    # 如果是URL，先下载图片
+                    async with session.get(image_path_or_url) as response:
+                        if response.status != 200:
+                            return False, f"下载图片失败，状态码: {response.status}"
+                        
+                        image_data = await response.read()
+                        
+                        # 准备上传
+                        data = aiohttp.FormData()
+                        data.add_field('media', image_data, 
+                                      filename='qrcode.png',
+                                      content_type='image/png')
+                        data.add_field('type', 'image')
+                        
+                        # 上传图片
+                        async with session.post(api_url, headers=headers, data=data) as upload_response:
+                            if upload_response.status != 200:
+                                return False, f"上传图片失败，状态码: {upload_response.status}"
+                            
+                            result = await upload_response.json()
+                            if "media_id" in result:
+                                return True, result["media_id"]
+                            else:
+                                return False, f"上传图片失败: {result}"
+                else:
+                    # 如果是本地路径，直接上传
+                    if os.path.exists(image_path_or_url):
+                        with open(image_path_or_url, 'rb') as f:
+                            image_data = f.read()
+                        
+                        # 准备上传
+                        data = aiohttp.FormData()
+                        data.add_field('media', image_data, 
+                                      filename=os.path.basename(image_path_or_url),
+                                      content_type='image/png')
+                        data.add_field('type', 'image')
+                        
+                        # 上传图片
+                        async with session.post(api_url, headers=headers, data=data) as upload_response:
+                            if upload_response.status != 200:
+                                return False, f"上传图片失败，状态码: {upload_response.status}"
+                            
+                            result = await upload_response.json()
+                            if "media_id" in result:
+                                return True, result["media_id"]
+                            else:
+                                return False, f"上传图片失败: {result}"
+                    else:
+                        return False, f"图片路径不存在: {image_path_or_url}"
         except Exception as e:
             logger.error(f"上传图片到QQ服务器时出错: {e}")
             return False, f"上传图片过程出错: {str(e)}"
+
+    async def send_image_message(self, target_openid, media_id):
+        """使用media_id发送图片消息
+        
+        Args:
+            target_openid (str): 目标用户的OpenID
+            media_id (str): 图片的media_id
+            
+        Returns:
+            tuple: (成功与否, 响应或错误消息)
+        """
+        try:
+            # 检查是否有access_token
+            if not hasattr(self, 'access_token') or not self.access_token:
+                # 尝试从配置中获取access_token
+                if hasattr(self.context, 'config') and 'qq_access_token' in self.context.config:
+                    self.access_token = self.context.config['qq_access_token']
+                else:
+                    return False, "未配置QQ access_token，无法发送图片"
+            
+            # 构建API请求URL
+            api_url = "https://api.q.qq.com/api/v2/bot/message/send"
+            
+            # 准备请求数据
+            data = {
+                "access_token": self.access_token,
+                "msg_type": "image",
+                "content": {"media_id": media_id},
+                "target": {"openid": target_openid}
+            }
+            
+            # 发送请求
+            async with aiohttp.ClientSession() as session:
+                headers = {"Content-Type": "application/json"}
+                async with session.post(api_url, headers=headers, json=data) as response:
+                    if response.status != 200:
+                        return False, f"发送图片消息失败，状态码: {response.status}"
+                    
+                    result = await response.json()
+                    return True, result
+        except Exception as e:
+            logger.error(f"发送图片消息时出错: {e}")
+            return False, f"发送图片消息过程出错: {str(e)}"
