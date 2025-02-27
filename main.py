@@ -72,7 +72,8 @@ class QQWebhookPlugin(Star):
             if isinstance(event, QQOfficialWebhookMessageEvent):
                 # QQ Webhook消息
                 logger.info(f"发送QQ Webhook消息: {chain}")
-                yield event.chain_result(chain)
+                # 直接返回消息内容
+                yield chain
             elif hasattr(event, 'group_id'):
                 # 其他平台群消息
                 logger.info(f"发送群消息: {chain}")
@@ -83,8 +84,8 @@ class QQWebhookPlugin(Star):
                 yield event.chain_result(chain)
         except Exception as e:
             logger.error(f"发送消息失败: {str(e)}, 事件类型: {type(event)}")
-            # 默认使用chain_result
-            yield event.chain_result(chain)
+            # 默认直接返回消息内容
+            yield chain
 
     async def login_check_loop(self, event: AstrMessageEvent, user_id: str):
         """循环检查登录状态"""
@@ -95,34 +96,31 @@ class QQWebhookPlugin(Star):
                 
                 if await self.check_login_status(user_id):
                     qq_number = self.user_qq_map.get(user_id)
-                    async for msg in self.send_message(event, [
+                    # 直接yield消息内容
+                    yield [
                         At(qq=user_id),
                         Plain(f"登录成功!\nQQ: {qq_number}\n用户ID: {user_id}")
-                    ]):
-                        yield msg
+                    ]
                     return
                 
                 remaining = (check_times - i - 1) * 10
                 if remaining > 0:
-                    async for msg in self.send_message(event, [
+                    yield [
                         At(qq=user_id),
                         Plain(f"正在等待扫码...剩余{remaining}秒")
-                    ]):
-                        yield msg
+                    ]
                 
-            async for msg in self.send_message(event, [
+            yield [
                 At(qq=user_id),
                 Plain("登录超时,请重试")
-            ]):
-                yield msg
+            ]
             
         except Exception as e:
             logger.error(f"登录检查循环异常: {str(e)}")
-            async for msg in self.send_message(event, [
+            yield [
                 At(qq=user_id),
                 Plain("登录检查出现错误")
-            ]):
-                yield msg
+            ]
         finally:
             if not self.user_qq_map.get(user_id):
                 self.login_codes.pop(user_id, None)
