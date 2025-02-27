@@ -1,4 +1,4 @@
-from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
+from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult, EventFilter
 from astrbot.api.star import Context, Star, register
 
 @register("qqbot", "QQ机器人", "QQ机器人消息处理插件 - 支持文本和图片回复", "1.0.0", "https://github.com/your-repo")
@@ -26,8 +26,8 @@ class QQBotPlugin(Star):
             self.logger.error(f"处理消息失败: {str(e)}")
             yield event.plain_result(f"❌ 消息处理失败: {str(e)}")
 
-    @filter.command("qqbing")
-    async def handle_image(self, event: AstrMessageEvent) -> MessageEventResult:
+    @filter.message(EventFilter.contains("/qqbing"))
+    async def handle_bing(self, event: AstrMessageEvent) -> MessageEventResult:
         '''
         发送预设的图片
         用法: /qqbing
