@@ -5,6 +5,8 @@ from astrbot.api.star import Context, Star, register
 class QQBotPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
+        # 预设的图片URL
+        self.default_image_url = "https://pan.zhil.cc/image/123.png"
     
     @filter.command("qq.reply")
     async def handle_qq_message(self, event: AstrMessageEvent) -> MessageEventResult:
@@ -27,17 +29,12 @@ class QQBotPlugin(Star):
     @filter.command("qq.image")
     async def handle_image(self, event: AstrMessageEvent) -> MessageEventResult:
         '''
-        回复QQ图片消息
-        用法: /qq.image <图片URL>
+        发送预设的图片
+        用法: /qq.image
         '''
-        image_url = event.message_str
-        if not image_url:
-            yield event.plain_result("请提供图片URL")
-            return
-            
         try:
-            # 使用AstrBot的图片消息回复
-            yield event.image_result(image_url)
+            # 直接发送预设的图片
+            yield event.image_result(self.default_image_url)
         except Exception as e:
             self.logger.error(f"发送图片失败: {str(e)}")
             yield event.plain_result(f"❌ 图片发送失败: {str(e)}")
@@ -51,9 +48,9 @@ class QQBotPlugin(Star):
         1. 回复文本消息
            命令: /qq.reply <消息内容>
            
-        2. 回复图片消息
-           命令: /qq.image <图片URL>
-           支持的图片格式: jpg, png, gif
+        2. 发送预设图片
+           命令: /qq.image
+           将发送固定的图片
            
         3. 查看帮助
            命令: /qq.help
