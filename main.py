@@ -39,7 +39,7 @@ class QQWebhookPlugin(Star):
     async def helloworld(self, event: AstrMessageEvent):
         try:
             # 图片URL
-            image_url = "https://example.com/image.jpg"
+            image_url = "https://www.aidroplet.cn/wp-content/uploads/2024/12/screenshot-20241225-094651.png"
             
             # 下载并缓存图片
             image_path = await self.download_image(image_url)
