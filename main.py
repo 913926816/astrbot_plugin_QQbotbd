@@ -20,6 +20,7 @@ class QQWebhookPlugin(Star):
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.login_codes = {}  # 存储用户ID和登录code的映射
         self.user_qq_map = {}  # 存储用户ID和QQ号的映射
+        self.login_tasks = {}  # 存储登录检查任务
         
     async def get_login_qrcode(self, user_id: str) -> tuple[str, str]:
         """获取登录二维码"""
@@ -231,4 +232,90 @@ class QQWebhookPlugin(Star):
                     return str(cache_path)
                 else:
                     raise Exception(f"下载图片失败: {response.status}")
+        
+    @on_message(EventMessageType.ALL)
+    async def on_message(self, event: AstrMessageEvent):
+        """处理所有消息"""
+        try:
+            user_id = event.get_sender_id()
+            message = event.message_str
+
+            if message.startswith("/login"):
+                yield from self.handle_login(event)
+            elif message.startswith("/whoami"):
+                yield from self.handle_whoami(event)
+            
+        except Exception as e:
+            logger.error(f"处理消息出错: {str(e)}")
+            yield event.chain_result([
+                At(qq=event.get_sender_id()),
+                Plain("消息处理出现错误")
+            ])
+
+    async def handle_login(self, event: AstrMessageEvent):
+        """处理登录命令"""
+        user_id = event.get_sender_id()
+        try:
+            image_path, login_code = await self.get_login_qrcode(user_id)
+            logger.info(f"二维码已保存到: {image_path}, code: {login_code}")
+            
+            # 发送二维码
+            yield event.chain_result([
+                At(qq=user_id),
+                Plain("请扫描二维码登录(30秒内有效)：\n"), 
+                Image.fromFileSystem(image_path),
+                Plain("\n请在30秒内完成扫码")
+            ])
+
+            # 开始检查登录状态
+            for i in range(3):  # 检查3次，每次10秒
+                await asyncio.sleep(10)
+                if await self.check_login_status(user_id):
+                    qq_number = self.user_qq_map.get(user_id)
+                    yield event.chain_result([
+                        At(qq=user_id),
+                        Plain(f"登录成功!\nQQ: {qq_number}\n用户ID: {user_id}")
+                    ])
+                    return
+                
+                remaining = (2 - i) * 10
+                if remaining > 0:
+                    yield event.chain_result([
+                        At(qq=user_id),
+                        Plain(f"正在等待扫码...剩余{remaining}秒")
+                    ])
+
+            yield event.chain_result([
+                At(qq=user_id),
+                Plain("登录超时,请重试")
+            ])
+
+        except Exception as e:
+            logger.error(f"登录处理出错: {str(e)}")
+            yield event.chain_result([
+                At(qq=user_id),
+                Plain("登录过程出现错误,请稍后重试")
+            ])
+
+    async def handle_whoami(self, event: AstrMessageEvent):
+        """处理whoami命令"""
+        user_id = event.get_sender_id()
+        try:
+            if user_id in self.user_qq_map:
+                qq_number = self.user_qq_map[user_id]
+                yield event.chain_result([
+                    At(qq=user_id),
+                    Plain(f"当前登录的QQ号: {qq_number}\n用户ID: {user_id}")
+                ])
+            else:
+                yield event.chain_result([
+                    At(qq=user_id),
+                    Plain("您还未登录QQ，请使用 /login 命令登录")
+                ])
+        except Exception as e:
+            logger.error(f"获取QQ信息出错: {str(e)}")
+            yield event.chain_result([
+                At(qq=user_id),
+                Plain("获取QQ信息失败")
+            ])
         
