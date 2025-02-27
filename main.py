@@ -138,7 +138,9 @@ class QQWebhookPlugin(Star):
                     qq_number = self.user_qq_map.get(user_id)
                     yield event.chain_result([
                         At(qq=user_id),
-                        Plain(f"登录成功! QQ: {qq_number} (用户ID: {user_id})")
+                        Plain(f"登录成功! QQ: {qq_number} 
+                              (用户ID: {user_id})"
+                              )
                     ])
                     return
                 
