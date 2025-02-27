@@ -1,6 +1,8 @@
 from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
+from astrbot.api.all import *
+from astrbot.api.message_components import *
 
 @register("astrbot_plugin_QQbotbd", "英一智", "我是一个简单的QQ扫码登录插件", "1.0.0", "https://github.com/913926816/astrbot_plugin_QQbotbd")
 class MyPlugin(Star):
