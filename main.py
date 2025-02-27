@@ -39,7 +39,22 @@ class QQLoginPlugin(Star):
                         with open(img_path, "wb") as f:
                             f.write(img_data)
                         
-                        # 发送本地图片
+                        # 构建富媒体消息
+                        rich_media = {
+                            "type": "rich_media",
+                            "title": "QQ登录二维码",
+                            "description": "请使用QQ扫描二维码登录",
+                            "image": {
+                                "path": img_path,
+                                "type": "image/png"
+                            },
+                            "url": login_url
+                        }
+                        
+                        # 发送富媒体消息
+                        yield event.rich_media_result(rich_media)
+                        
+                        # 作为备用，同时发送普通图片
                         yield event.image_result(img_path)
                         
                         # 清理临时文件
