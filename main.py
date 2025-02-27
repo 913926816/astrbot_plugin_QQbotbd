@@ -38,7 +38,7 @@ class QQWebhookPlugin(Star):
             
         except Exception as e:
             logger.error(f"处理消息出错: {str(e)}")
-            return event.plain_result("消息处理出现错误,请稍后重试")
+            yield event.plain_result("消息处理出现错误,请稍后重试")
 
     async def handle_webhook_event(self, event_data: Dict[str, Any]):
         """处理QQ Webhook事件"""
@@ -76,8 +76,8 @@ class QQWebhookPlugin(Star):
             if self.robot_uin and self.robot_appid:
                 chain.append(Plain(f"\n来自机器人: {self.robot_uin}"))
                 
-            return event.chain_result(chain)
+            yield event.chain_result(chain)
             
         except Exception as e:
             logger.error(f"处理hello指令出错: {str(e)}")
-            return event.plain_result("指令处理出现错误,请稍后重试")
+            yield event.plain_result("指令处理出现错误,请稍后重试")
