@@ -1,6 +1,6 @@
 name: astrbot_plugin_QQbotbd
 display_name: QQ绑定插件
 version: 1.0.0
-description: 一个通过二维码登录绑定QQ号的插件
-author: 913926816
+description: 一个扫码登录绑定QQ号的插件
+author: 英一智
 repository: https://github.com/913926816/astrbot_plugin_QQbotbd
