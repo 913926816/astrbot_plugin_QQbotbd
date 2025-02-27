@@ -103,14 +103,23 @@ class QQWebhookPlugin(Star):
     async def login_check_loop(self, event: AstrMessageEvent, user_id: str):
         """循环检查登录状态"""
         try:
-            for i in range(30):  # 30秒超时
+            check_times = 6  # 检查6次，每次5秒
+            for i in range(check_times):
+                # 等待5秒后检查
+                await asyncio.sleep(5)
+                
+                # 检查登录状态
                 if await self.check_login_status(user_id):
                     yield event.plain_result(f"登录成功! UIN: {self.robot_uin}")
                     return
-                if i % 5 == 0:  # 每5秒提示一次
-                    yield event.plain_result("正在等待扫码...")
-                await asyncio.sleep(1)
+                
+                # 未成功则显示剩余时间
+                remaining = (check_times - i - 1) * 5
+                if remaining > 0:
+                    yield event.plain_result(f"正在等待扫码...剩余{remaining}秒")
+                
             yield event.plain_result("登录超时,请重试")
+            
         except Exception as e:
             logger.error(f"登录检查循环异常: {str(e)}")
             yield event.plain_result("登录检查出现错误")
@@ -134,7 +143,7 @@ class QQWebhookPlugin(Star):
                 At(qq=user_id),
                 Plain("请扫描二维码登录(30秒内有效)：\n"), 
                 Image.fromFileSystem(image_path),
-                Plain("\n正在等待扫码...")
+                Plain("\n请在30秒内完成扫码")
             ]
             yield event.chain_result(chain)
             
