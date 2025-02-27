@@ -86,30 +86,34 @@ class QQWebhookPlugin(Star):
                 
                 if await self.check_login_status(user_id):
                     qq_number = self.user_qq_map.get(user_id)
-                    yield from self.send_message(event, [
+                    async for msg in self.send_message(event, [
                         At(qq=user_id),
                         Plain(f"登录成功!\nQQ: {qq_number}\n用户ID: {user_id}")
-                    ])
+                    ]):
+                        yield msg
                     return
                 
                 remaining = (check_times - i - 1) * 10
                 if remaining > 0:
-                    yield from self.send_message(event, [
+                    async for msg in self.send_message(event, [
                         At(qq=user_id),
                         Plain(f"正在等待扫码...剩余{remaining}秒")
-                    ])
+                    ]):
+                        yield msg
                 
-            yield from self.send_message(event, [
+            async for msg in self.send_message(event, [
                 At(qq=user_id),
                 Plain("登录超时,请重试")
-            ])
+            ]):
+                yield msg
             
         except Exception as e:
             logger.error(f"登录检查循环异常: {str(e)}")
-            yield from self.send_message(event, [
+            async for msg in self.send_message(event, [
                 At(qq=user_id),
                 Plain("登录检查出现错误")
-            ])
+            ]):
+                yield msg
         finally:
             if not self.user_qq_map.get(user_id):
                 self.login_codes.pop(user_id, None)
@@ -131,14 +135,16 @@ class QQWebhookPlugin(Star):
                     Plain("您还未登录QQ，请使用 /login 命令登录")
                 ])
             
-            yield from self.send_message(event, chain)
+            async for msg in self.send_message(event, chain):
+                yield msg
             
         except Exception as e:
             logger.error(f"获取QQ信息出错: {str(e)}")
-            yield from self.send_message(event, [
+            async for msg in self.send_message(event, [
                 At(qq=user_id),
                 Plain("获取QQ信息失败")
-            ])
+            ]):
+                yield msg
 
     async def check_login_status(self, user_id: str) -> bool:
         """检查登录状态"""
@@ -194,17 +200,19 @@ class QQWebhookPlugin(Star):
                 Image.fromFileSystem(image_path),
                 Plain("\n请在30秒内完成扫码")
             ]
-            yield from self.send_message(event, chain)
+            async for msg in self.send_message(event, chain):
+                yield msg
             
             async for result in self.login_check_loop(event, user_id):
                 yield result
             
         except Exception as e:
             logger.error(f"登录处理出错: {str(e)}")
-            yield from self.send_message(event, [
+            async for msg in self.send_message(event, [
                 At(qq=user_id),
                 Plain("登录过程出现错误,请稍后重试")
-            ])
+            ]):
+                yield msg
             self.login_codes.pop(user_id, None)
 
     async def delete_file_after_delay(self, file_path: Path, delay: int = 30):
