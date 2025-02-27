@@ -73,11 +73,28 @@ class QQWebhookPlugin(Star):
             async with aiohttp.ClientSession() as session:
                 async with session.get(f"https://api.yuafeng.cn/API/ly/music_login.php?type=getTicket&code={code}") as response:
                     if response.status == 200:
-                        data = await response.json()
-                        logger.info(f"检查登录状态响应: {data}")
-                        if data.get("code") == 0:
-                            self.robot_uin = data.get("data", {}).get("uin")
-                            return True
+                        # 先获取文本内容
+                        text = await response.text()
+                        logger.info(f"检查登录状态原始响应: {text}")
+                        
+                        # 解析JSON
+                        data = json.loads(text)
+                        logger.info(f"检查登录状态JSON响应: {data}")
+                        
+                        if data.get("code") == 0 and "data" in data:
+                            uin = data["data"].get("uin")
+                            if uin:
+                                self.robot_uin = uin
+                                logger.info(f"登录成功, UIN: {uin}")
+                                return True
+                            else:
+                                logger.warning("登录响应中未找到UIN")
+                        elif data.get("code") == -1:
+                            logger.info("用户未完成扫码")
+                        else:
+                            logger.warning(f"登录检查返回未知状态: {data}")
+                    else:
+                        logger.error(f"登录检查请求失败: status={response.status}")
                     return False
         except Exception as e:
             logger.error(f"检查登录状态异常: {str(e)}")
