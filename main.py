@@ -17,6 +17,7 @@ class QQWebhookPlugin(Star):
         self.cache_dir = Path("data/cache/images")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.login_codes = {}  # 存储用户ID和登录code的映射
+        self.user_qq_map = {}  # 存储用户ID和QQ号的映射
         
     async def get_login_qrcode(self, user_id: str) -> tuple[str, str]:
         """获取登录二维码"""
@@ -62,6 +63,20 @@ class QQWebhookPlugin(Star):
             logger.error(f"获取二维码异常: {str(e)}")
         raise Exception("获取登录二维码失败")
 
+    @command("whoami")
+    async def whoami(self, event: AstrMessageEvent):
+        """查看当前登录的QQ账号"""
+        try:
+            user_id = event.get_sender_id()
+            if user_id in self.user_qq_map:
+                qq_number = self.user_qq_map[user_id]
+                yield event.plain_result(f"当前登录的QQ号: {qq_number}")
+            else:
+                yield event.plain_result("您还未登录QQ，请使用 /login 命令登录")
+        except Exception as e:
+            logger.error(f"获取QQ信息出错: {str(e)}")
+            yield event.plain_result("获取QQ信息失败")
+
     async def check_login_status(self, user_id: str) -> bool:
         """检查登录状态"""
         try:
@@ -73,11 +88,9 @@ class QQWebhookPlugin(Star):
             async with aiohttp.ClientSession() as session:
                 async with session.get(f"https://api.yuafeng.cn/API/ly/music_login.php?type=getTicket&code={code}") as response:
                     if response.status == 200:
-                        # 先获取文本内容
                         text = await response.text()
                         logger.info(f"检查登录状态原始响应: {text}")
                         
-                        # 解析JSON
                         data = json.loads(text)
                         logger.info(f"检查登录状态JSON响应: {data}")
                         
@@ -85,7 +98,9 @@ class QQWebhookPlugin(Star):
                             uin = data["data"].get("uin")
                             if uin:
                                 self.robot_uin = uin
-                                logger.info(f"登录成功, UIN: {uin}")
+                                # 保存用户ID和QQ号的映射
+                                self.user_qq_map[user_id] = uin
+                                logger.info(f"用户 {user_id} 登录成功, QQ: {uin}")
                                 return True
                             else:
                                 logger.warning("登录响应中未找到UIN")
@@ -103,17 +118,15 @@ class QQWebhookPlugin(Star):
     async def login_check_loop(self, event: AstrMessageEvent, user_id: str):
         """循环检查登录状态"""
         try:
-            check_times = 3  # 检查6次，每次5秒
+            check_times = 3  # 检查3次，每次10秒
             for i in range(check_times):
-                # 等待5秒后检查
                 await asyncio.sleep(10)
                 
-                # 检查登录状态
                 if await self.check_login_status(user_id):
-                    yield event.plain_result(f"登录成功! UIN: {self.robot_uin}")
+                    qq_number = self.user_qq_map.get(user_id)
+                    yield event.plain_result(f"登录成功! QQ: {qq_number}")
                     return
                 
-                # 未成功则显示剩余时间
                 remaining = (check_times - i - 1) * 10
                 if remaining > 0:
                     yield event.plain_result(f"正在等待扫码...剩余{remaining}秒")
@@ -124,8 +137,9 @@ class QQWebhookPlugin(Star):
             logger.error(f"登录检查循环异常: {str(e)}")
             yield event.plain_result("登录检查出现错误")
         finally:
-            # 清理登录code
-            self.login_codes.pop(user_id, None)
+            if not self.user_qq_map.get(user_id):
+                # 只有在登录失败时才清理code
+                self.login_codes.pop(user_id, None)
 
     @command("login")
     async def login(self, event: AstrMessageEvent):
@@ -188,27 +202,3 @@ class QQWebhookPlugin(Star):
                 else:
                     raise Exception(f"下载图片失败: {response.status}")
         
-    @command("helloworld")
-    async def helloworld(self, event: AstrMessageEvent):
-        try:
-            # 获取发送者ID
-            user_id = event.get_sender_id()
-            
-            # 图片URL
-            image_url = "https://www.aidroplet.cn/wp-content/uploads/2024/12/screenshot-20241225-094651.png"
-            
-            # 下载并缓存图片
-            image_path = await self.download_image(image_url, user_id)
-            
-            # 构造消息链
-            chain = [
-                At(qq=user_id), # At 消息发送者
-                Plain("来看这个图："), 
-                Image.fromFileSystem(image_path), # 发送缓存的图片
-                Plain("这是一个缓存的图片,将在30秒后自动删除。")
-            ]
-            yield event.chain_result(chain)
-            
-        except Exception as e:
-            logger.error(f"处理图片出错: {str(e)}")
-            yield event.plain_result("抱歉,图片处理出现错误。")
