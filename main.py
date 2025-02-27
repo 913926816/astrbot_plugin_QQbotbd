@@ -30,7 +30,7 @@ class QQBotPlugin(Star):
     async def handle_image(self, event: AstrMessageEvent) -> MessageEventResult:
         '''
         发送预设的图片
-        用法: /qq.image
+        用法: /qqbing
         '''
         try:
             # 直接发送预设的图片
@@ -49,7 +49,7 @@ class QQBotPlugin(Star):
            命令: /qq.reply <消息内容>
            
         2. 发送预设图片
-           命令: /qq.image
+           命令: /qqbing
            将发送固定的图片
            
         3. 查看帮助
