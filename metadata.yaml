@@ -1,6 +1,6 @@
-name: astrbot_plugin_QQbotbd
-display_name: QQ绑定插件
-version: 1.0.0
-description: 一个扫码登录绑定QQ号的插件
-author: 英一智
-repository: https://github.com/913926816/astrbot_plugin_QQbotbd
+name: astrbot_plugin_QQbotbd # 这是你的插件的唯一识别名。
+desc: 我是一个QQ扫码绑定插件。 # 插件简短描述
+help: 你猜我怎么使用。 # 插件的帮助信息
+version: v1.0 # 插件版本号。格式：v1.1.1 或者 v1.1
+author: 英一智 # 作者
+repo: https://github.com/913926816/astrbot_plugin_QQbotbd # 插件的仓库地址
