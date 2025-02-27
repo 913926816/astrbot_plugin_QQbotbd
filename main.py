@@ -100,7 +100,7 @@ class QQWebhookPlugin(Star):
         finally:
             # 清理登录code
             self.login_codes.pop(user_id, None)
-        
+
     @command("login")
     async def login(self, event: AstrMessageEvent):
         """QQ登录指令"""
@@ -122,7 +122,8 @@ class QQWebhookPlugin(Star):
             yield event.chain_result(chain)
             
             # 启动登录状态检查
-            await self.login_check_loop(event, user_id)
+            async for result in self.login_check_loop(event, user_id):
+                yield result
             
         except Exception as e:
             logger.error(f"登录处理出错: {str(e)}")
