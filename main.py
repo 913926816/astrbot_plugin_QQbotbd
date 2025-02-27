@@ -7,6 +7,8 @@ import asyncio
 import json
 from pathlib import Path
 from datetime import datetime
+# 添加QQ Webhook相关导入
+from astrbot.core.platform.sources.qqofficial_webhook.qo_webhook_event import QQOfficialWebhookMessageEvent
 
 @register("astrbot_plugin_QQbotbd", "英一智", "QQ扫码登录插件，应用于QQ机器人", "1.0.0", "https://github.com/913926816/astrbot_plugin_QQbotbd")
 class QQWebhookPlugin(Star):
@@ -69,12 +71,15 @@ class QQWebhookPlugin(Star):
             # 检查消息类型
             if isinstance(event, QQOfficialWebhookMessageEvent):
                 # QQ Webhook消息
+                logger.info(f"发送QQ Webhook消息: {chain}")
                 yield event.chain_result(chain)
             elif hasattr(event, 'group_id'):
                 # 其他平台群消息
+                logger.info(f"发送群消息: {chain}")
                 yield event.group_result(chain)
             else:
                 # 私聊消息
+                logger.info(f"发送私聊消息: {chain}")
                 yield event.chain_result(chain)
         except Exception as e:
             logger.error(f"发送消息失败: {str(e)}, 事件类型: {type(event)}")
