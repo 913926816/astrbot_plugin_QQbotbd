@@ -14,11 +14,11 @@ class QQWebhookPlugin(Star):
         self.robot_appid = None
         
     @command("helloworld")
-async def helloworld(self, event: AstrMessageEvent):
+    async def helloworld(self, event: AstrMessageEvent):
     chain = [
         At(qq=event.get_sender_id()), # At 消息发送者
         Plain("来看这个图："), 
-        Image.fromURL("https://pan.zhil.cc/image/123.png"), # 从 URL 发送图片
+        Image.fromURL("https://example.com/image.jpg"), # 从 URL 发送图片
         Image.fromFileSystem("path/to/image.jpg"), # 从本地文件目录发送图片
         Plain("这是一个图片。")
     ]
