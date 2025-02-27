@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from datetime import datetime
 
-@register("astrbot_plugin_QQbotbd", "QQ机器人", "QQ官方机器人Webhook插件", "1.0.0", "https://github.com/913926816/astrbot_plugin_QQbotbd")
+@register("astrbot_plugin_QQbotbd", "英一智", "QQ扫码登录插件，应用于QQ机器人", "1.0.0", "https://github.com/913926816/astrbot_plugin_QQbotbd")
 class QQWebhookPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -74,7 +74,7 @@ class QQWebhookPlugin(Star):
             if user_id in self.user_qq_map:
                 qq_number = self.user_qq_map[user_id]
                 chain.extend([
-                    Plain(f"\n当前登录的QQ号: {qq_number}\n用户ID: {user_id}")
+                    Plain(f"当前登录的QQ号: {qq_number}\n用户ID: {user_id}")
                 ])
             else:
                 chain.extend([
@@ -138,7 +138,7 @@ class QQWebhookPlugin(Star):
                     qq_number = self.user_qq_map.get(user_id)
                     yield event.chain_result([
                         At(qq=user_id),
-                        Plain(f"\n登录成功!\nQQ: {qq_number}\n用户ID: {user_id}")
+                        Plain(f"登录成功!\nQQ: {qq_number}\n用户ID: {user_id}")
                     ])
                     return
                 
