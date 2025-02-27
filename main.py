@@ -66,16 +66,20 @@ class QQWebhookPlugin(Star):
     async def send_message(self, event: AstrMessageEvent, chain: list):
         """统一的消息发送处理"""
         try:
-            # 检查是否为QQ Webhook消息
-            if hasattr(event, 'group_id'):
-                # 群消息
+            # 检查消息类型
+            if isinstance(event, QQOfficialWebhookMessageEvent):
+                # QQ Webhook消息
+                yield event.chain_result(chain)
+            elif hasattr(event, 'group_id'):
+                # 其他平台群消息
                 yield event.group_result(chain)
             else:
                 # 私聊消息
                 yield event.chain_result(chain)
         except Exception as e:
-            logger.error(f"发送消息失败: {str(e)}")
-            yield event.chain_result(chain)  # 默认使用chain_result
+            logger.error(f"发送消息失败: {str(e)}, 事件类型: {type(event)}")
+            # 默认使用chain_result
+            yield event.chain_result(chain)
 
     async def login_check_loop(self, event: AstrMessageEvent, user_id: str):
         """循环检查登录状态"""
@@ -175,6 +179,8 @@ class QQWebhookPlugin(Star):
                                 logger.warning("登录响应中未找到UIN")
                         elif data.get("code") == -1:
                             logger.info("用户未完成扫码")
+                        elif data.get("code") == -2:
+                            logger.info("登录code已过期")
                         else:
                             logger.warning(f"登录检查返回未知状态: {data}")
                     else:
