@@ -1,7 +1,13 @@
 from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult, EventFilter
 from astrbot.api.star import Context, Star, register
 
-@register("qqbot", "QQ机器人", "QQ机器人消息处理插件 - 支持文本和图片回复", "1.0.0", "https://github.com/your-repo")
+@register(
+    name="astrbot_plugin_QQbotbd",
+    author="913926816",
+    description="一个通过二维码登录绑定QQ号的插件",
+    version="1.0.0",
+    repository="https://github.com/913926816/astrbot_plugin_QQbotbd"
+)
 class QQBotPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -43,16 +49,13 @@ class QQBotPlugin(Star):
     async def show_help(self, event: AstrMessageEvent) -> MessageEventResult:
         '''显示QQ机器人插件帮助信息'''
         help_text = """
-        QQ机器人消息处理插件使用帮助:
+        QQ绑定插件使用帮助:
         
-        1. 回复文本消息
-           命令: /qq.reply <消息内容>
-           
-        2. 发送预设图片
+        1. 发送预设图片
            命令: /qqbing
            将发送固定的图片
            
-        3. 查看帮助
+        2. 查看帮助
            命令: /qq.help
         """
         yield event.plain_result(help_text)
