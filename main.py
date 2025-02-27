@@ -24,32 +24,41 @@ class QQWebhookPlugin(Star):
             async with aiohttp.ClientSession() as session:
                 async with session.get("https://api.yuafeng.cn/API/ly/music_login.php?type=getCode") as response:
                     if response.status == 200:
-                        data = await response.json()
-                        logger.info(f"获取二维码响应: {data}")
-                        if "data" in data and "qr_Img" in data["data"]:
-                            qr_img_base64 = data["data"]["qr_Img"]
-                            login_code = data["data"]["code"]
+                        # 先获取原始文本
+                        text = await response.text()
+                        logger.info(f"获取二维码原始响应: {text}")
+                        
+                        try:
+                            data = json.loads(text)
+                            logger.info(f"解析JSON响应: {data}")
                             
-                            # 将base64转换为图片并保存
-                            import base64
-                            img_data = base64.b64decode(qr_img_base64)
-                            
-                            # 使用用户ID和时间戳作为文件名
-                            file_name = f"qrcode_{user_id}_{int(datetime.now().timestamp())}.jpg"
-                            cache_path = self.cache_dir / file_name
-                            
-                            # 保存图片
-                            with open(cache_path, "wb") as f:
-                                f.write(img_data)
+                            if "data" in data and "qr_Img" in data["data"]:
+                                qr_img_base64 = data["data"]["qr_Img"]
+                                login_code = data["data"]["code"]
                                 
-                            # 启动定时删除任务
-                            asyncio.create_task(self.delete_file_after_delay(cache_path))
+                                # 将base64转换为图片并保存
+                                import base64
+                                img_data = base64.b64decode(qr_img_base64)
+                                
+                                # 使用用户ID和时间戳作为文件名
+                                file_name = f"qrcode_{user_id}_{int(datetime.now().timestamp())}.jpg"
+                                cache_path = self.cache_dir / file_name
+                                
+                                # 保存图片
+                                with open(cache_path, "wb") as f:
+                                    f.write(img_data)
+                                    
+                                # 启动定时删除任务
+                                asyncio.create_task(self.delete_file_after_delay(cache_path))
+                                
+                                # 保存code用于后续验证
+                                self.login_codes[user_id] = login_code
+                                return str(cache_path), login_code
+                                
+                        except json.JSONDecodeError as e:
+                            logger.error(f"JSON解析失败: {e}, 原始响应: {text}")
                             
-                            # 保存code用于后续验证
-                            self.login_codes[user_id] = login_code
-                            return str(cache_path), login_code
-                            
-                    logger.error(f"获取二维码失败: status={response.status}, data={data}")
+                    logger.error(f"获取二维码失败: status={response.status}, content_type={response.content_type}")
         except Exception as e:
             logger.error(f"获取二维码异常: {str(e)}")
         raise Exception("获取登录二维码失败")
