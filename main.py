@@ -14,7 +14,7 @@ class QQWebhookPlugin(Star):
         self.robot_appid = None
         
     @command("helloworld")
-        async def helloworld(self, event: AstrMessageEvent):
+    async def helloworld(self, event: AstrMessageEvent):
         chain = [
         At(qq=event.get_sender_id()), # At 消息发送者
         Plain("来看这个图："), 
