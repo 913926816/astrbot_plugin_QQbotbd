@@ -26,7 +26,7 @@ class QQBotPlugin(Star):
             self.logger.error(f"处理消息失败: {str(e)}")
             yield event.plain_result(f"❌ 消息处理失败: {str(e)}")
 
-    @filter.message(EventFilter.contains("/qqbing"))
+    @filter.startswith("/qqbing")
     async def handle_bing(self, event: AstrMessageEvent) -> MessageEventResult:
         '''
         发送预设的图片
@@ -39,7 +39,7 @@ class QQBotPlugin(Star):
             self.logger.error(f"发送图片失败: {str(e)}")
             yield event.plain_result(f"❌ 图片发送失败: {str(e)}")
 
-    @filter.command("qq.help")
+    @filter.startswith("/qq.help")
     async def show_help(self, event: AstrMessageEvent) -> MessageEventResult:
         '''显示QQ机器人插件帮助信息'''
         help_text = """
