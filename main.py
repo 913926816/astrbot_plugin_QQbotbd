@@ -68,7 +68,6 @@ class QQWebhookPlugin(Star):
         """查看当前登录的QQ账号"""
         try:
             user_id = event.get_sender_id()
-            # 构造消息链
             chain = [At(qq=user_id)]  # 先At用户
             
             if user_id in self.user_qq_map:
@@ -80,14 +79,26 @@ class QQWebhookPlugin(Star):
                 chain.extend([
                     Plain("您还未登录QQ，请使用 /login 命令登录")
                 ])
-            yield event.chain_result(chain)
+                
+            # 发送到群聊
+            if event.is_group:
+                yield event.group_result(chain)
+            else:
+                yield event.chain_result(chain)
             
         except Exception as e:
             logger.error(f"获取QQ信息出错: {str(e)}")
-            yield event.chain_result([
-                At(qq=user_id),
-                Plain("获取QQ信息失败")
-            ])
+            # 发送到群聊
+            if event.is_group:
+                yield event.group_result([
+                    At(qq=user_id),
+                    Plain("获取QQ信息失败")
+                ])
+            else:
+                yield event.chain_result([
+                    At(qq=user_id),
+                    Plain("获取QQ信息失败")
+                ])
 
     async def check_login_status(self, user_id: str) -> bool:
         """检查登录状态"""
@@ -136,30 +147,58 @@ class QQWebhookPlugin(Star):
                 
                 if await self.check_login_status(user_id):
                     qq_number = self.user_qq_map.get(user_id)
-                    yield event.chain_result([
-                        At(qq=user_id),
-                        Plain(f"登录成功!\nQQ: {qq_number}\n用户ID: {user_id}")
-                    ])
+                    # 发送到群聊
+                    if event.is_group:
+                        yield event.group_result([
+                            At(qq=user_id),
+                            Plain(f"登录成功!\nQQ: {qq_number}\n用户ID: {user_id}")
+                        ])
+                    else:
+                        yield event.chain_result([
+                            At(qq=user_id),
+                            Plain(f"登录成功!\nQQ: {qq_number}\n用户ID: {user_id}")
+                        ])
                     return
                 
                 remaining = (check_times - i - 1) * 10
                 if remaining > 0:
-                    yield event.chain_result([
-                        At(qq=user_id),
-                        Plain(f"正在等待扫码...剩余{remaining}秒")
-                    ])
+                    # 发送到群聊
+                    if event.is_group:
+                        yield event.group_result([
+                            At(qq=user_id),
+                            Plain(f"正在等待扫码...剩余{remaining}秒")
+                        ])
+                    else:
+                        yield event.chain_result([
+                            At(qq=user_id),
+                            Plain(f"正在等待扫码...剩余{remaining}秒")
+                        ])
                 
-            yield event.chain_result([
-                At(qq=user_id),
-                Plain("登录超时,请重试")
-            ])
+            # 发送到群聊
+            if event.is_group:
+                yield event.group_result([
+                    At(qq=user_id),
+                    Plain("登录超时,请重试")
+                ])
+            else:
+                yield event.chain_result([
+                    At(qq=user_id),
+                    Plain("登录超时,请重试")
+                ])
             
         except Exception as e:
             logger.error(f"登录检查循环异常: {str(e)}")
-            yield event.chain_result([
-                At(qq=user_id),
-                Plain("登录检查出现错误")
-            ])
+            # 发送到群聊
+            if event.is_group:
+                yield event.group_result([
+                    At(qq=user_id),
+                    Plain("登录检查出现错误")
+                ])
+            else:
+                yield event.chain_result([
+                    At(qq=user_id),
+                    Plain("登录检查出现错误")
+                ])
         finally:
             if not self.user_qq_map.get(user_id):
                 # 只有在登录失败时才清理code
