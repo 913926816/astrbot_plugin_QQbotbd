@@ -103,10 +103,10 @@ class QQWebhookPlugin(Star):
     async def login_check_loop(self, event: AstrMessageEvent, user_id: str):
         """循环检查登录状态"""
         try:
-            check_times = 6  # 检查6次，每次5秒
+            check_times = 3  # 检查6次，每次5秒
             for i in range(check_times):
                 # 等待5秒后检查
-                await asyncio.sleep(5)
+                await asyncio.sleep(10)
                 
                 # 检查登录状态
                 if await self.check_login_status(user_id):
@@ -114,7 +114,7 @@ class QQWebhookPlugin(Star):
                     return
                 
                 # 未成功则显示剩余时间
-                remaining = (check_times - i - 1) * 5
+                remaining = (check_times - i - 1) * 10
                 if remaining > 0:
                     yield event.plain_result(f"正在等待扫码...剩余{remaining}秒")
                 
