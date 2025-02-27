@@ -26,7 +26,7 @@ class QQBotPlugin(Star):
             self.logger.error(f"处理消息失败: {str(e)}")
             yield event.plain_result(f"❌ 消息处理失败: {str(e)}")
 
-    @filter.command("qq.image")
+    @filter.command("qqbing")
     async def handle_image(self, event: AstrMessageEvent) -> MessageEventResult:
         '''
         发送预设的图片
