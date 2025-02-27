@@ -20,54 +20,76 @@ class QQWebhookPlugin(Star):
         
     async def get_login_qrcode(self, user_id: str) -> tuple[str, str]:
         """获取登录二维码"""
-        async with aiohttp.ClientSession() as session:
-            async with session.get("https://api.yuafeng.cn/API/ly/music_login.php?type=getCode") as response:
-                if response.status == 200:
-                    data = await response.json()
-                    if data["code"] == 0:
-                        qr_img_url = data["data"]["qr_Img"]
-                        login_code = data["data"]["code"]
-                        # 保存code用于后续验证
-                        self.login_codes[user_id] = login_code
-                        return qr_img_url, login_code
-                raise Exception("获取登录二维码失败")
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get("https://api.yuafeng.cn/API/ly/music_login.php?type=getCode") as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        logger.info(f"获取二维码响应: {data}")
+                        if data.get("code") == 0 and "data" in data:
+                            qr_img_url = data["data"]["qr_Img"]
+                            login_code = data["data"]["code"]
+                            # 保存code用于后续验证
+                            self.login_codes[user_id] = login_code
+                            return qr_img_url, login_code
+                    logger.error(f"获取二维码失败: status={response.status}, data={data}")
+        except Exception as e:
+            logger.error(f"获取二维码异常: {str(e)}")
+        raise Exception("获取登录二维码失败")
 
     async def check_login_status(self, user_id: str) -> bool:
         """检查登录状态"""
-        if user_id not in self.login_codes:
-            return False
-            
-        code = self.login_codes[user_id]
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"https://api.yuafeng.cn/API/ly/music_login.php?type=getTicket&code={code}") as response:
-                if response.status == 200:
-                    data = await response.json()
-                    if data["code"] == 0:
-                        # 登录成功,保存UIN
-                        self.robot_uin = data.get("data", {}).get("uin")
-                        return True
+        try:
+            if user_id not in self.login_codes:
+                logger.warning(f"用户 {user_id} 的登录code不存在")
                 return False
+                
+            code = self.login_codes[user_id]
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"https://api.yuafeng.cn/API/ly/music_login.php?type=getTicket&code={code}") as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        logger.info(f"检查登录状态响应: {data}")
+                        if data.get("code") == 0:
+                            self.robot_uin = data.get("data", {}).get("uin")
+                            return True
+                    return False
+        except Exception as e:
+            logger.error(f"检查登录状态异常: {str(e)}")
+            return False
 
     async def login_check_loop(self, event: AstrMessageEvent, user_id: str):
         """循环检查登录状态"""
-        for _ in range(30):  # 30秒超时
-            if await self.check_login_status(user_id):
-                yield event.plain_result(f"登录成功! UIN: {self.robot_uin}")
-                return
-            await asyncio.sleep(1)
-        yield event.plain_result("登录超时,请重试")
+        try:
+            for i in range(30):  # 30秒超时
+                if await self.check_login_status(user_id):
+                    yield event.plain_result(f"登录成功! UIN: {self.robot_uin}")
+                    return
+                if i % 5 == 0:  # 每5秒提示一次
+                    yield event.plain_result("正在等待扫码...")
+                await asyncio.sleep(1)
+            yield event.plain_result("登录超时,请重试")
+        except Exception as e:
+            logger.error(f"登录检查循环异常: {str(e)}")
+            yield event.plain_result("登录检查出现错误")
+        finally:
+            # 清理登录code
+            self.login_codes.pop(user_id, None)
         
     @command("login")
     async def login(self, event: AstrMessageEvent):
         """QQ登录指令"""
         try:
             user_id = event.get_sender_id()
+            logger.info(f"用户 {user_id} 开始登录流程")
             
             # 获取登录二维码
-            qr_img_url, _ = await self.get_login_qrcode(user_id)
+            qr_img_url, login_code = await self.get_login_qrcode(user_id)
+            logger.info(f"获取到二维码URL: {qr_img_url}, code: {login_code}")
             
             # 下载并缓存二维码
             image_path = await self.download_image(qr_img_url, user_id)
+            logger.info(f"二维码已缓存到: {image_path}")
             
             # 发送二维码
             chain = [
@@ -79,11 +101,13 @@ class QQWebhookPlugin(Star):
             yield event.chain_result(chain)
             
             # 启动登录状态检查
-            asyncio.create_task(self.login_check_loop(event, user_id))
+            await self.login_check_loop(event, user_id)
             
         except Exception as e:
             logger.error(f"登录处理出错: {str(e)}")
             yield event.plain_result("登录过程出现错误,请稍后重试")
+            # 清理登录code
+            self.login_codes.pop(user_id, None)
 
     async def delete_file_after_delay(self, file_path: Path, delay: int = 30):
         """延迟删除文件"""
