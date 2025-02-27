@@ -22,31 +22,23 @@ class QQWebhookPlugin(Star):
         """获取登录二维码"""
         try:
             async with aiohttp.ClientSession() as session:
+                # 获取登录信息
                 async with session.get("https://api.yuafeng.cn/API/ly/music_login.php?type=getCode") as response:
                     if response.status == 200:
                         text = await response.text()
                         logger.info(f"获取二维码原始响应: {text}")
                         
-                        try:
-                            data = json.loads(text)
-                            logger.info(f"解析JSON响应: {data}")
+                        data = json.loads(text)
+                        logger.info(f"解析JSON响应: {data}")
+                        
+                        if "data" in data and "qr_Img" in data["data"]:
+                            qr_img_url = data["data"]["qr_Img"]
+                            login_code = data["data"]["code"]
                             
-                            if "data" in data and "qr_Img" in data["data"]:
-                                qr_img_base64 = data["data"]["qr_Img"]
-                                login_code = data["data"]["code"]
-                                
-                                # 处理base64字符串
-                                import base64
-                                # 移除可能的base64前缀
-                                if "," in qr_img_base64:
-                                    qr_img_base64 = qr_img_base64.split(",", 1)[1]
-                                # 添加padding
-                                padding = len(qr_img_base64) % 4
-                                if padding:
-                                    qr_img_base64 += "=" * (4 - padding)
-                                
-                                try:
-                                    img_data = base64.b64decode(qr_img_base64)
+                            # 下载二维码图片
+                            async with session.get(qr_img_url) as img_response:
+                                if img_response.status == 200:
+                                    img_data = await img_response.read()
                                     
                                     # 使用用户ID和时间戳作为文件名
                                     file_name = f"qrcode_{user_id}_{int(datetime.now().timestamp())}.jpg"
@@ -62,13 +54,8 @@ class QQWebhookPlugin(Star):
                                     # 保存code用于后续验证
                                     self.login_codes[user_id] = login_code
                                     return str(cache_path), login_code
-                                    
-                                except Exception as e:
-                                    logger.error(f"Base64解码失败: {e}, base64字符串长度: {len(qr_img_base64)}")
-                                    logger.debug(f"Base64字符串: {qr_img_base64[:100]}...")  # 只记录前100个字符
-                            
-                        except json.JSONDecodeError as e:
-                            logger.error(f"JSON解析失败: {e}, 原始响应: {text}")
+                                else:
+                                    logger.error(f"下载二维码图片失败: status={img_response.status}")
                             
                     logger.error(f"获取二维码失败: status={response.status}, content_type={response.content_type}")
         except Exception as e:
